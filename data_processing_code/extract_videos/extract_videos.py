@@ -16,13 +16,7 @@ from extract_frames import  extract_frames
 from savefigure import save_figure_as_image
 
 # specify the paths to the data
-
-data_dir = "/home/ethan/video_proj/data/"
-bb_path = "train_test_val_merged_detections_v2.csv"
-action_path = "bball_dataset_april_4.csv"
-video_dir = "videos/"
-processed_dir = "/home/ethan/video_proj/processed_data/"
-test_dir = 'test/'
+from variables import *
 
 header_names = ['youtube_id', 'vid_w', 'vid_h',
                 'clip_start', 'clip_end', 'event_start', 'event_end',
