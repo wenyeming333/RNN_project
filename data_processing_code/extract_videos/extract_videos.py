@@ -9,6 +9,7 @@ import shutil
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import matplotlib.patches as patches
+import pdb
 
 from get_video_timestamps import get_timestamps
 from extract_frames import  extract_frames
@@ -16,11 +17,11 @@ from savefigure import save_figure_as_image
 
 # specify the paths to the data
 
-data_dir = "/ais/gobi4/basketball/data/"
+data_dir = "/home/ethan/video_proj/data/"
 bb_path = "train_test_val_merged_detections_v2.csv"
 action_path = "bball_dataset_april_4.csv"
 video_dir = "videos/"
-processed_dir = "/ais/gobi4/basketball/processed_data/"
+processed_dir = "/home/ethan/video_proj/processed_data/"
 test_dir = 'test/'
 
 header_names = ['youtube_id', 'vid_w', 'vid_h',
@@ -29,11 +30,11 @@ header_names = ['youtube_id', 'vid_w', 'vid_h',
                 'event', 'train_val_test']
 actions = pd.read_csv(data_dir + action_path, header=0, names=header_names)
 # sort the actions dataframe accoriding to youtube_id and clip start time
-actions = actions.sort_values(['youtube_id', 'clip_start'])
+actions = actions.sort_values(['youtube_id', 'clip_start', 'event_start'])
 
 header_names_actions = ['youtube_id', 'time', 'x', 'y', 'w', 'h', 'id']
 bbs = pd.read_csv(data_dir + bb_path, header=0, names=header_names_actions)
-bbs.time = bbs.time * 0.001 # convert the time to microseconds
+bbs.time = bbs.time * 0.001 # convert the time from microseconds to milliseseconds
 
 #temp.ix[(temp['clip_start'] - 518685.0).abs().argsort()[:2]]
 
@@ -54,12 +55,13 @@ timestamps = get_timestamps(processed_dir, video_name, video_path, duration)
 timestamps.columns = ['time']
 #timestamps.index += 1  # shift the index by one to correspond to the image name
 # extract frames
-extract_frames(processed_dir, video_name, video_path, duration)
+#pdb.set_trace()
+#extract_frames(processed_dir, video_name, video_path, duration)
 
 # now get the action data belonging to a a specific game
 game_actions = actions[actions.youtube_id == video_name]
 game_actions = game_actions.reset_index()
-game_bbs = bbs[ bbs.youtube_id == video_name]
+game_bbs = bbs[ bbs.youtube_id == video_name] #?????
 
 game_bbs_uniq_times = game_bbs.time.unique()
 
@@ -83,6 +85,9 @@ for clip_id, clip in game_actions.iterrows():
     if not os.path.exists(clip_dir + '/frames'):
         os.mkdir(clip_dir + '/frames')
 
+    if not os.path.exists(clip_dir + '/events')
+        os.mkdir(clip_dir + '/events')
+
     # copy all the frames belonging to this clip tp the clip_dir+/frames directory
     clip_start_ind = timestamps.index[(timestamps['time'] - clip.clip_start).abs().argsort()[:1]].tolist()[0]
     clip_end_ind = timestamps.index[(timestamps['time'] - clip.clip_end).abs().argsort()[:1]].tolist()[0]
@@ -91,6 +96,8 @@ for clip_id, clip in game_actions.iterrows():
         shutil.copy(processed_dir+video_name+'/frames/'+str(ii)+'.jpg',
                     clip_dir+'/frames/'+str(ii)+'.jpg')
 
+    event_end_ind = timestamps.index[(timestamps['time'] - clip.event_end).abs().argsort()[:1]].tolist()[0]
+    event_start_ind = timestamps.index[(timestamps['time'] - (clip.event_end-4000)).abs().argsort()[:1]].tolist()[0]
 
     # Now for each bounding box with a time that belongs to clip, add the bounding boxes to the image
     for time in game_bbs_uniq_times:
