@@ -12,9 +12,23 @@ import pdb
 from get_video_timestamps import get_timestamps
 from extract_frames import  extract_frames
 from savefigure import save_figure_as_image
+from time import gmtime, strftime, ctime
 
 # specify the paths to the data
 from variables import *
+
+if draw_bbs:
+	import matplotlib.pyplot as plt
+	plt.switch_backend('agg')
+	import matplotlib.image as mpimg
+	import matplotlib.patches as patches
+	
+colors = ['#b3ccff', '#ccff66', '#ff99cc', '#006699',
+		  '#993366', '#ffff66', '#cc99ff', 'w', '0.5', '#ffe0cc',
+		  '#669980', '#ff6666', '#cc3300', '#b3c6ff', '#ffcccc',
+		  '#00cc00', '#003366', '#ff9999', '#666699', '#e0e0eb',
+		  '#800000', '#999966', '#003300', '#00ccff', '#009933',
+		  '#666699', 'r', 'g', 'c', 'm', 'y']
 
 header_names = ['youtube_id', 'vid_w', 'vid_h',
 				'clip_start', 'clip_end', 'event_start', 'event_end',
@@ -77,15 +91,13 @@ for clip_id, clip in game_actions.iterrows():
 	#for ii in range(event_start_ind, event_end_ind+1):
 	#	shutil.copy(processed_dir+video_name+'/frames/'+str(ii)+'.jpg',
 	#				clip_dir+'/'+str(ii)+'.jpg')
-
 	
+	color_assignment = {}
+	count = 0
 
 	# Now for each bounding box with a time that belongs to clip, add the bounding boxes to the image
 	for time in game_bbs_uniq_times:
-		#print('clip: '+ str(clip_id+1)+' ,time: '+ str(time))
-
-
-        #pdb.set_trace()
+		
 		if time >= (clip.event_end-4000) and time <= clip.event_end:
 
 			img_bbs = game_bbs[game_bbs.time == time]
@@ -112,9 +124,43 @@ for clip_id, clip in game_actions.iterrows():
 
 			img_bbs['event'] = pd.Series(np.array([clip.event for _, bbox in img_bbs.iterrows()]),
 										 index=img_bbs.index)
-
+										 
+			img_bbs['p_id'] = pd.Series(np.array(
+										[re.findall(r'_\d*_', bbox.id)[0][1:-1] for _, bbox in img_bbs.iterrows()]),
+										 index=img_bbs.index)
+										 
 			with open('{}/{}_info.csv'.format(clip_dir, ind), 'ab') as info_f:
 				img_bbs.to_csv(info_f)
+			
+			if draw_bbs:
+				img = mpimg.imread(img_name)
+
+				fig = plt.figure(frameon=False)
+				ax = plt.Axes(fig, [0., 0., 1., 1.])
+				ax.set_axis_off()
+				fig.add_axes(ax)
+
+				ax.imshow(img)
+				
+				for _, bbox in img_bbs.iterrows():
+				
+					if bbox.p_id in color_assignment:
+						color = color_assignment[bbox.p_id]
+					else:
+						color = colors[count]
+						count += 1
+						color_assignment[bbox.p_id] = color
+						
+					rect = patches.Rectangle((bbox.bbs_x, bbox.bbs_y),
+											 bbox.bbs_w, bbox.bbs_h, linewidth=3,
+											 edgecolor=color,
+											 facecolor='none')
+					ax.add_patch(rect)
+
+				dpi = fig.dpi
+				fig.set_size_inches(game_wid / dpi, game_h / dpi)
+				fig.savefig(img_name)
+				plt.close(fig)
 
 	try:
 		from html_dashboard.codes.main import HTMLFramework
@@ -122,16 +168,15 @@ for clip_id, clip in game_actions.iterrows():
 							 page_title='Files in {}'.format(clip_dir))
 
 		images = glob.glob('{}/*.jpg'.format(clip_dir))
-        images.sort()
+		images.sort()
 		captions = []
 		cap_len = 2
 		for im in images:
 			info_file = '{}_info.csv'.format(im[:im.find('.jpg')])
 			try:
 				cap = []
-				#pdb.set_trace()
 				info_f = open(info_file).readlines()
-				cap.append(info_f[1].split(',')[-1])
+				cap.append(info_f[1].split(',')[-2])
 				cap.append('Num players detected: {}'.format(len(info_f)-1))
 				captions.append(cap)
 			except:
@@ -139,12 +184,33 @@ for clip_id, clip in game_actions.iterrows():
 
 		images = [im[im.rfind('/')+1:] for im in images]
 
-		html.set_image_table(images, width=game_wid, height=game_h, captions=captions, num_col=2)
+		html.set_image_table(images, width=game_wid, height=game_h, captions=captions, num_col=2,
+							 sec_name='Frame Images')
+
+		info_files = glob.glob('{}/*.csv'.format(clip_dir))
+
+		table = html.body.table()
+
+		header_row = table.tr
+
+		header_row.th().text('Name')
+		header_row.th().text('Last Modified')
+		header_row.th().text('Size Description')
+
+		info_files = [f[f.rfind('/')+1:] for f in info_files]
+
+		#pdb.set_trace()
+
+		for f in info_files:
+			row = table.tr
+			row.td().a(href='{}'.format(f)).text('{}'.format(f))
+			row.td(align='right').text('{}'.format(ctime(os.path.getmtime('{}/{}'.format(clip_dir, f)))))
+			row.td(align='right').text('{}'.format(os.path.getsize('{}/{}'.format(clip_dir, f))))
 
 		html.write_html()
 
 	except Exception as e:
-		pass
+		print e
 
 try:
 	from html_dashboard.codes.list_directory import DirectoryHTML
