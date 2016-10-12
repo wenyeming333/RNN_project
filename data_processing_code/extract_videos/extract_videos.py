@@ -28,7 +28,7 @@ colors = ['#b3ccff', '#ccff66', '#ff99cc', '#006699',
 		  '#669980', '#ff6666', '#cc3300', '#b3c6ff', '#ffcccc',
 		  '#00cc00', '#003366', '#ff9999', '#666699', '#e0e0eb',
 		  '#800000', '#999966', '#003300', '#00ccff', '#009933',
-		  '#666699', 'r', 'g', 'c', 'm', 'y']
+		  '#666699', 'r', 'g', 'c', 'm', 'y', 'b']
 
 header_names = ['youtube_id', 'vid_w', 'vid_h',
 				'clip_start', 'clip_end', 'event_start', 'event_end',
@@ -102,6 +102,8 @@ for clip_id, clip in game_actions.iterrows():
 
 			img_bbs = game_bbs[game_bbs.time == time]
 
+			#pdb.set_trace()
+
 			ind = timestamps.index[(timestamps['time'] - time).abs().argsort()[:1]].tolist()[0]
 			ind += 1 # since the image naming starts from 1
 
@@ -128,6 +130,8 @@ for clip_id, clip in game_actions.iterrows():
 			img_bbs['p_id'] = pd.Series(np.array(
 										[re.findall(r'_\d*_', bbox.id)[0][1:-1] for _, bbox in img_bbs.iterrows()]),
 										 index=img_bbs.index)
+										 
+			img_bbs['time'] = pd.Series(time, index=img_bbs.index)
 										 
 			with open('{}/{}_info.csv'.format(clip_dir, ind), 'ab') as info_f:
 				img_bbs.to_csv(info_f)
@@ -170,14 +174,16 @@ for clip_id, clip in game_actions.iterrows():
 		images = glob.glob('{}/*.jpg'.format(clip_dir))
 		images.sort()
 		captions = []
-		cap_len = 2
+		cap_len = 4
 		for im in images:
 			info_file = '{}_info.csv'.format(im[:im.find('.jpg')])
 			try:
 				cap = []
-				info_f = open(info_file).readlines()
-				cap.append(info_f[1].split(',')[-2])
-				cap.append('Num players detected: {}'.format(len(info_f)-1))
+				info_f = pd.read_csv(info_file)
+				cap.append(info_f.event[0])
+				cap.append('Num players detected: {}'.format(len(info_f.event)))
+				cap.append('Time: {}'.format(info_f.time[0]))
+				cap.append('Ind: {}'.format(im[im.rfind('/')+1:-4]))
 				captions.append(cap)
 			except:
 				captions.append(['' for i in range(cap_len)])
