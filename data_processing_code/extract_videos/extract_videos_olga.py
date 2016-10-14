@@ -33,8 +33,8 @@ def main():
 		import matplotlib.patches as patches
 
 	game_bbs = bbs_data[bbs_data.youtube_id == video_name]
-	game_bbs = game_bbs.reset_index()
 	game_actions = actions_data[actions_data.youtube_id == video_name]
+	game_actions = game_actions.reset_index()
 	game_actions.event_end *= 0.001
 
 	# get video
@@ -52,7 +52,7 @@ def main():
 	# iterating over clips/events
 	for clip_ind, clip in game_actions.iterrows():
 
-		clip_dir = setFileDirectory(video_dir, 'event_{}'.format(clip_ind))
+		clip_dir = setFileDirectory(video_dir, 'clip_{}'.format(clip_ind+1))
 
 		event_start = clip.event_end - 4
 		clip_bbs = game_bbs[game_bbs.time >= event_start]
@@ -62,6 +62,10 @@ def main():
 		count = 0
 
 		color_assignment = {}
+		captions = []
+
+		with open('{}/clip_info.csv'.format(clip_dir), 'ab') as clip_info_f:
+			clip.to_csv(clip_info_f)
 
 		# iterating over frames
 		for frame_time in clip_bbs_uniq_times:
@@ -75,6 +79,16 @@ def main():
 			frame_bbs.w *= video.w
 			frame_bbs.y *= video.h
 			frame_bbs.h *= video.h
+
+			with open('{}/{:02}_info.csv'.format(clip_dir, count), 'ab') as bbs_f:
+				frame_bbs.to_csv(bbs_f)
+
+			# update caption information
+			if create_html:
+				cap = []
+				cap.append('Num players detected: {}'.format(len(frame_bbs.x)))
+				cap.append('Time: {}'.format(frame_time))
+				captions.append(cap)
 
 			# codes for drawing bbs
 			if draw_bbs:
@@ -112,11 +126,12 @@ def main():
 								 page_title='Files in {}'.format(clip_dir))
 
 			images = glob.glob('{}/*.jpg'.format(clip_dir))
+
 			images = [im[im.rfind('/')+1:] for im in images]
 			images.sort()
 
-			html.set_image_table(images, width=video.w, height=video.h, num_col=2,
-							 sec_name='Frame Images')
+			html.set_image_table(images, width=video.w, height=video.h, num_col=2, captions=captions,
+							 sec_name='{}'.format(clip.event))
 
 			html.write_html()
 
