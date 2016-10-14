@@ -35,7 +35,7 @@ class DataSet(object):
 
 	# If it is training, flag=1, 2 for validation, 3 for test.
 	def next_batch_train(self,batch_size,flag=1):
-		strat = self._index_in_epoch
+		start = self._index_in_epoch
 		self._index_in_epoch += batch_size
 		if self._index_in_epoch > self.number_files[flag-1]:
 			self._epochs_completed += 1
