@@ -15,16 +15,14 @@ warnings.filterwarnings("ignore")
 
 # load required local modules
 from util import *
+# specify the paths to the data
+from variables import *
 
-def main():
-	# specify the paths to the data
-	from variables import *
+def main(video_name, create_html, draw_bbs):
+	print 'Processing video: {}'.format(video_name)
 
 	# load data
 	actions_data, bbs_data = read_csv_data(data_dir+action_path, data_dir+bb_path)
-
-	# get arguments
-	video_name, create_html, draw_bbs = get_args()
 
 	if draw_bbs:
 		import matplotlib.pyplot as plt
@@ -42,17 +40,17 @@ def main():
 	video = VideoFileClip(video_path)
 
 	# create a folder for the video where all the processed data will go to but first check if it exists
-	processed_dir += 'olga/'
+	#processed_dir += 'olga/'
 	if not os.path.exists(processed_dir):
 		os.mkdir(processed_dir)
-	video_dir = processed_dir + video_name
-	if not os.path.exists(video_dir):
-		os.mkdir(video_dir)
+	video_directory = processed_dir + video_name
+	if not os.path.exists(video_directory):
+		os.mkdir(video_directory)
 
 	# iterating over clips/events
 	for clip_ind, clip in game_actions.iterrows():
 
-		clip_dir = setFileDirectory(video_dir, 'clip_{}'.format(clip_ind+1))
+		clip_dir = setFileDirectory(video_directory, 'clip_{}'.format(clip_ind+1))
 
 		event_start = clip.event_end - 4
 		clip_bbs = game_bbs[game_bbs.time >= event_start]
@@ -137,11 +135,24 @@ def main():
 
 	if create_html:
 		from html_dashboard.codes.list_directory import DirectoryHTML
-		html = DirectoryHTML('{}'.format(video_dir))
+		html = DirectoryHTML('{}'.format(video_directory))
 		html.write_html()
 		html = DirectoryHTML('{}'.format(processed_dir))
 		html.write_html()
 			
 
 if __name__ == '__main__':
-	main()
+	# get arguments
+	video_name, create_html, draw_bbs = get_args()
+
+	if not video_name:
+		actions_data, bbs_data = read_csv_data(data_dir+action_path, data_dir+bb_path)
+		videos_id = actions_data.youtube_id.unique()
+		for vid in videos_id:
+			try:
+				main(vid, create_html, draw_bbs)
+			except Exception as e:
+				print 'Error in processing: {}'.format(vid)
+				print e
+	else:
+		main(video_name, create_html, draw_bbs)

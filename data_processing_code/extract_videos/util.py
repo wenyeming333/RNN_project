@@ -24,7 +24,7 @@ def get_args():
 		description='Script to preprocess NCAA data.')
 
 	parser.add_argument('-v', '--video', type=str, help='video id',
-		required=False, default='-KUYDYCwnOQ')
+		required=False, default=None)
 
 	parser.add_argument('-ch', '--create-html', action='store_true', help='create htmls', default=False)
 
