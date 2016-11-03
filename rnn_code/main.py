@@ -1,19 +1,23 @@
 from variables import *
-from preprocess.inception_v3 import *
 import time
 import cPickle as Pickle
 from util.util import *
+from util.setData import RNNData
 import numpy as np
 
 def saveProcessAllData():
+	from preprocess.inception_v3 import *
 	from os import listdir
 	from glob import glob 
-	
-	videos = listdir(processed_dir)
+	from os.path import isdir
+	videos = [f for f in listdir(processed_dir) \
+					if isdir('{}/{}'.format(processed_dir, f))]
+
 	model = InceptionV3(include_top=False, weights='imagenet')
 	
 	for v in videos:
-		clips = listdir('{}/{}'.format(processed_dir, v))
+		clips = [f for f in listdir('{}/{}'.format(processed_dir, v))\
+					if isdir('{}/{}/{}'.format(processed_dir, v, f))]
 		video_path = setFileDirectory(features_dir, v)
 		for clip in clips:
 		
@@ -34,4 +38,7 @@ def main():
 	saveProcessAllData()
 	
 if __name__ == '__main__':
-	main()
+	#main()
+	rnn_data = RNNData(data_dir, action_path, processed_dir)
+	import pdb
+	pdb.set_trace()
