@@ -23,6 +23,9 @@ from keras.utils.layer_utils import convert_all_kernels_in_model
 from keras.utils.data_utils import get_file
 from keras import backend as K
 from keras.applications.imagenet_utils import decode_predictions
+import time
+import cPickle as Pickle
+from keras.preprocessing.image import load_img, img_to_array, list_pictures
 
 TH_WEIGHTS_PATH = 'https://github.com/fchollet/deep-learning-models/releases/download/v0.2/inception_v3_weights_th_dim_ordering_th_kernels.h5'
 TF_WEIGHTS_PATH = 'https://github.com/fchollet/deep-learning-models/releases/download/v0.2/inception_v3_weights_tf_dim_ordering_tf_kernels.h5'
@@ -45,6 +48,7 @@ def conv2d_bn(x, nb_filter, nb_row, nb_col,
 		bn_axis = 1
 	else:
 		bn_axis = 3
+
 	x = Convolution2D(nb_filter, nb_row, nb_col,
 					  subsample=subsample,
 					  activation='relu',
@@ -60,7 +64,7 @@ def InceptionV3(include_top=True, weights='imagenet',
 	optionally loading weights pre-trained
 	on ImageNet. Note that when using TensorFlow,
 	for best performance you should set
-	`image_dim_ordering="tf"` in your Keras config
+	`image_dim_ordering="th"` in your Keras config
 	at ~/.keras/keras.json.
 	The model and the weights are compatible with both
 	TensorFlow and Theano. The dimension ordering
@@ -83,15 +87,17 @@ def InceptionV3(include_top=True, weights='imagenet',
 						 '(pre-training on ImageNet).')
 	# Determine proper input shape
 	if K.image_dim_ordering() == 'th':
-		if include_top:
-			input_shape = (3, 299, 299)
-		else:
-			input_shape = (3, None, None)
+		input_shape = (3,299,299)
+		# if include_top:
+		#	 input_shape = (3, 299, 299)
+		# else:
+		#	 input_shape = (3, None, None)
 	else:
-		if include_top:
-			input_shape = (299, 299, 3)
-		else:
-			input_shape = (None, None, 3)
+		input_shape = (299,299,3)
+		# if include_top:
+		#	 input_shape = (299, 299, 3)
+		# else:
+		#	 input_shape = (None, None, 3)
 
 	if input_tensor is None:
 		img_input = Input(shape=input_shape)
@@ -105,6 +111,7 @@ def InceptionV3(include_top=True, weights='imagenet',
 		channel_axis = 1
 	else:
 		channel_axis = 3
+
 
 	x = conv2d_bn(img_input, 32, 3, 3, subsample=(2, 2), border_mode='valid')
 	x = conv2d_bn(x, 32, 3, 3, border_mode='valid')
@@ -246,10 +253,13 @@ def InceptionV3(include_top=True, weights='imagenet',
 				  mode='concat', concat_axis=channel_axis,
 				  name='mixed' + str(9 + i))
 
+	x = AveragePooling2D((8, 8), strides=(8, 8), name='avg_pool')(x)
+	x = Flatten(name='flatten')(x)
+
 	if include_top:
 		# Classification block
-		x = AveragePooling2D((8, 8), strides=(8, 8), name='avg_pool')(x)
-		x = Flatten(name='flatten')(x)
+		# x = AveragePooling2D((8, 8), strides=(8, 8), name='avg_pool')(x)
+		# x = Flatten(name='flatten')(x)
 		x = Dense(1000, activation='softmax', name='predictions')(x)
 
 	# Create model
@@ -294,24 +304,56 @@ def InceptionV3(include_top=True, weights='imagenet',
 			if K.backend() == 'theano':
 				convert_all_kernels_in_model(model)
 	return model
+	
+def random_crop(image, crop_size):
+	height, width = image.shape[1:]
+	dy, dx = crop_size
+	if width < dx or height < dy:
+		return None
+	x = np.random.randint(0, width - dx + 1)
+	y = np.random.randint(0, height - dy + 1)
+	return image[:, y:(y+dy), x:(x+dx)]
+	
+def image_generator(list_of_files, crop_size=None, to_grayscale=False, scale=1, shift=0, target_size=(299,299)):
+	for filename in list_of_files:
+		img = img_to_array(load_img(filename, to_grayscale, target_size=target_size))
+
+		img = np.expand_dims(img, axis=0)
+		img = preprocess_input(img)
+		
+		cropped_img = random_crop(img, crop_size) if crop_size else img
+		if cropped_img is None:
+			continue
+			
+		
+		yield scale * cropped_img - shift
 
 
+def load_image_from_dir(dir):
+	images = list_pictures(dir)
+	import pdb
+	pdb.set_trace()
+	return image_generator(images), len(images)
+	
 def preprocess_input(x):
 	x /= 255.
 	x -= 0.5
 	x *= 2.
 	return x
 
-
 if __name__ == '__main__':
-	model = InceptionV3(include_top=True, weights='imagenet')
-
+	start_time = time.time()
+	
 	img_path = '/ais/gobi4/basketball/olga_ethan_processed_data/-KUYDYCwnOQ/clip_1/00.jpg'
 	img = image.load_img(img_path, target_size=(299, 299))
+	
+	model = InceptionV3(include_top=False, weights='imagenet')
 	x = image.img_to_array(img)
 	x = np.expand_dims(x, axis=0)
-
 	x = preprocess_input(x)
-
 	preds = model.predict(x)
-	print('Predicted:', decode_predictions(preds))
+	np.save('npyfile.npy',preds)
+	with open('Picklefile.pkl','wb') as f:
+		Pickle.dump(preds,f)
+	print(preds.shape)
+	print('The program takes {} seconds to run'.format(time.time()-start_time))
