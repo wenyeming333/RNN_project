@@ -315,25 +315,29 @@ def random_crop(image, crop_size):
 	return image[:, y:(y+dy), x:(x+dx)]
 	
 def image_generator(list_of_files, crop_size=None, to_grayscale=False, scale=1, shift=0, target_size=(299,299)):
+
+	images = np.empty(shape=[0, 3, target_size[0], target_size[1]])
+	
 	for filename in list_of_files:
+
 		img = img_to_array(load_img(filename, to_grayscale, target_size=target_size))
 
 		img = np.expand_dims(img, axis=0)
 		img = preprocess_input(img)
 		
 		cropped_img = random_crop(img, crop_size) if crop_size else img
-		if cropped_img is None:
-			continue
 			
+		cropped_img = scale * cropped_img - shift
 		
-		yield scale * cropped_img - shift
+		images = np.append(images, img, axis=0)
+		
+	return images
+		
 
 
 def load_image_from_dir(dir):
 	images = list_pictures(dir)
-	import pdb
-	pdb.set_trace()
-	return image_generator(images), len(images)
+	return image_generator(images)
 	
 def preprocess_input(x):
 	x /= 255.
