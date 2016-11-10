@@ -56,11 +56,11 @@ class Video_Event_dectection():
 		#self.features = tf.placeholder(tf.float32, [self.batch_size, self.L, self.D])
 		#self.captions = tf.placeholder(tf.int32, [None, self.T + 1])
 
-	def _get_initial_lstm(self, features):
+	def _get_initial_lstm(self, features, mode=1):
 		with tf.variable_scope('initial_lstm'):
 			features_mean = tf.reduce_mean(features, 1)
             # change self.D to self.M
-			w_h = tf.get_variable('w_h', [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
+			w_h = tf.get_variable('w_h{}'.format(mode), [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
 			b_h = tf.get_variable('b_h', [self.dim_hidden], initializer=self.const_initializer)
 			h = tf.nn.tanh(tf.matmul(features_mean, w_h) + b_h)
 
@@ -102,14 +102,19 @@ class Video_Event_dectection():
 
 	def build_model(self):
 		batch_size = tf.shape(features)[0]
-		features = tf.placeholder("float32", [batch_size, self.ctx_shape[0], self.ctx_shape[1]])
-		mask = tf.placeholder("float32", [self.batch_size, self.n_lstm_steps])
+		features = tf.placeholder("float32", [None, self.ctx_shape[0], self.ctx_shape[1]])
+		# mask = tf.placeholder("float32", [self.batch_size, self.n_lstm_steps])
 
 		features = self._word_embedding(features)
-		c, h = self._get_initial_lstm(features=features)
+		c1, h1 = self._get_initial_blstm(features=features)
+		c2, h2 = self._get_initial_blstm(features=features)
+		c, h = self._get_initial_lstm
 		lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden)
 		loss = 0.0
 		for inx in range(self.n_lstm_steps):
-			with tf.variable_scope('lstm', reuse=(t!=0)):
-				output, _, _ = tf.nn.bidirectional_rnn(lstm_cell,lstm_cell,features)
-
+			with tf.variable_scope('jjjjjjjlstm', reuse=(t!=0)):
+				h1, _, h2 = tf.nn.bidirectional_rnn(lstm_cell,lstm_cell,features,h1,h2)
+				context, alpha = self._attention_layer(features, features_proj, h, reuse=(t!=0))
+				_, (c, h) = lstm_cell(inputs=tf.concat(1, [x[:,t,:], context]), state=[c, h])
+				loss += klklklklkl
+		
