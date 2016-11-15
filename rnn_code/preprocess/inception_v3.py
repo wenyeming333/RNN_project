@@ -337,7 +337,7 @@ def image_generator(list_of_files, crop_size=None, to_grayscale=False, scale=1, 
 
 def load_image_from_dir(dir):
 	images = list_pictures(dir)
-	return image_generator(images)
+	return images, image_generator(images)
 	
 def preprocess_input(x):
 	x /= 255.
@@ -355,6 +355,8 @@ if __name__ == '__main__':
 	x = image.img_to_array(img)
 	x = np.expand_dims(x, axis=0)
 	x = preprocess_input(x)
+	import pdb
+	pdb.set_trace()
 	preds = model.predict(x)
 	np.save('npyfile.npy',preds)
 	with open('Picklefile.pkl','wb') as f:
