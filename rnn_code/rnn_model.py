@@ -135,6 +135,7 @@ class Video_Event_dectection():
 			error_mat = tf.sub(tf.ones([prediction_value[0].get_shape().as_list()[0], 11]), labels)
 			loss += tf.square(tf.nn.relu(1 - tf.mul(error_mat, prediction_value)))
 		loss *= 0.5
+		return loss
 
 # Debug
 
