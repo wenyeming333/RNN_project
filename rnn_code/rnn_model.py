@@ -8,6 +8,8 @@ import pandas as pd
 import cPickle
 from keras.preprocessing import sequence
 
+slim = tf.contrib.slim 
+slim_predict = tf.contrib.slim
 # =========================================================================================
 # Implementation of "Show, Attend and Tell: Neural Caption Generator With Visual Attention".
 # There are some notations.
@@ -38,13 +40,12 @@ class Video_Event_dectection():
 		  dropout: (optional) If true then dropout layer is added.
 		"""
 
-		ctx_shape = [20, 2048]
+		self.ctx_shape = [20, 2048]
 		self.N = 10
 		self.dim_embed = dim_embed
 		self.player_feature_shape = [None, 10, dim_embed]
 		self.dim_ctx = dim_ctx
 		self.dim_hidden = dim_hidden
-		self.ctx_shape = ctx_shape
 		self.n_lstm_steps = n_lstm_steps
 
 		self.weight_initializer = tf.random_normal_initializer(mean=0.0, stddev=0.01)
@@ -66,18 +67,26 @@ class Video_Event_dectection():
 
 	def _frame_embedding(self, inputs, reuse=False):
 		with tf.variable_scope('frame_embedding', reuse=reuse):
-			# change self.V to 1
-			w = tf.get_variable('w_f', [20, self.dim_embed], initializer=self.emb_initializer)
-			x = tf.nn.embedding_lookup(w, inputs, name='frame_vector')  # (N, T, M) or (N, M)
-			return x
+	
+			w = tf.get_variable('w_f', [self.ctx_shape[1], self.dim_embed], initializer=self.emb_initializer)
+			
+			b = tf.Variable(tf.constant(0.0, shape=[self.dim_embed]))
+			inputs = tf.reshape(inputs, (-1, self.ctx_shape[1]))
+			x = tf.nn.relu(tf.matmul(inputs, w)+b, name='frame_vector')
+			
+			return tf.reshape(x, (-1, self.ctx_shape[0], self.dim_embed))
 
 	# dimension!!!!!!! [20,10,self.dim_embed] ????????????
 	def _player_embedding(self, inputs, reuse=False):
 		with tf.variable_scope('player_embedding', reuse=reuse):
-			# change self.V to 1.
-			w = tf.get_variable('w_p', [10, self.dim_embed], initializer=self.emb_initializer)
-			x = tf.nn.embedding_lookup(w, inputs, name='player_vector')  # (N, T, M) or (N, M)
-			return x
+	
+			w = tf.get_variable('w_p', [self.ctx_shape[1], self.dim_embed], initializer=self.emb_initializer)
+			b = tf.Variable(tf.constant(0.0, shape=[self.dim_embed]))
+			inputs = tf.reshape(inputs, (-1, self.ctx_shape[1]))
+			#w = tf.get_variable('w_p', [10, self.dim_embed], initializer=self.emb_initializer)
+			#x = tf.nn.embedding_lookup(w, inputs, name='player_vector')  # (N, T, M) or (N, M)
+			x = tf.nn.relu(tf.matmul(inputs, w)+b, name='player_vector')
+			return tf.reshape(x, (-1, self.ctx_shape[0], self.dim_embed))
 
 	def _attention_layer(self, features, N=10, reuse=False):
 		with tf.variable_scope('attention_layer', reuse=reuse):
@@ -98,16 +107,18 @@ class Video_Event_dectection():
 			return tf.batch_matmul(w, features)
 
 	def build_model(self):
-		batch_size = tf.shape(features)[0]
-		features = tf.placeholder("float32", [None, self.ctx_shape[0], self.ctx_shape[1]])
-		player_features = tf.placeholder("float32", self.player_feature_shape)
-		labels = tf.placeholder("float32", [None, 11])
+		#batch_size = tf.shape(features)[0]
+		self.features = tf.placeholder("float32", [None, self.ctx_shape[0], self.ctx_shape[1]])
+		self.player_features = tf.placeholder("float32", self.player_feature_shape)
+		self.labels = tf.placeholder("float32", [None, 11])
 		# mask = tf.placeholder("float32", [self.batch_size, self.n_lstm_steps])
 
-		features = self._frame_embedding(features)
-		player_features = self._player_embedding(player_features)
+		self.em_frame = self._frame_embedding(self.features)
+		self.em_player = self._player_embedding(self.player_features)
 		#reversed_features = tf.nn.rnn._reverse_seq(features, self.ctx_shape[0], 1, batch_dim=0)
-		reversed_features = tf.reverse_sequence(features, self.ctx_shape[0], 1, batch_dim=0)
+		import pdb
+		pdb.set_trace()
+		reversed_features = tf.reverse_sequence(self.em_frame, self.ctx_shape[0], 1, batch_dim=0)
 
 		c1, h1 = self._get_initial_lstm(features=features, mode=1)
 		c2, h2 = self._get_initial_lstm(features=features, mode=2) # Frame Blstm
@@ -128,7 +139,7 @@ class Video_Event_dectection():
 			att_features = tf.concat(2, [player_features, tf.tile(frame_features, [1, 10, 1])])
 			gamma = self._attention_layer(att_features, False, self.N)
 			expected_features = tf.einsum('ij,kjl->il', gamma, player_features)
-			with tf.variables('event_lstm'):
+			with tf.variables('event_lstm'): 
 				_, (c3, h3) = lstm2_cell(expected_features, state = [c3, h3])
 			prediction_value = self._prediction_layer(h3)
 
@@ -137,5 +148,9 @@ class Video_Event_dectection():
 		loss *= 0.5
 
 # Debug
-
-cell = Video_Event_dectection()
+if __name__ == '__main__':
+	import pdb
+	pdb.set_trace()
+	cell = Video_Event_dectection()
+	cell.build_model()
+	pdb.set_trace()
