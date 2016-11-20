@@ -8,12 +8,6 @@ import cPickle as pickle
 from scipy import ndimage
 from variables import *
 
-#        solver = CaptioningSolver(model, data, val_data, n_epochs=n_epochs, batch_size=batch_size, 
-#        update_rule='adam',
-#        learning_rate=learning_rate, print_every=3000, save_every=1, image_path='./image/',
-#        pretrained_model=None, model_path=model_path, test_model='./model/lstm/model-10',
-#        print_bleu=True, log_path=log_path)
-
 
 class VideoSolver(object):
 	def __init__(self, model, data, val_data, **kwargs):
@@ -21,7 +15,8 @@ class VideoSolver(object):
 	    Required Arguments:
 	    - model: Show Attend and Tell caption generating model
 	    - data: Training data; dictionary with the following keys:
-	        - features: Feature vectors of shape (82783, 196, 512)
+	        - frame_features: Feature vectors of shape (, , ,)
+			- player_features: Feature vectors of shape (, , ,)
 	        - labels: ....................
 	        - file_names: Image file names of shape (82783, )
 	        - captions: Captions of shape (400131, 17) 
@@ -61,14 +56,10 @@ class VideoSolver(object):
 	    self.model_path = kwargs.pop('model_path', './model/')
 	    self.pretrained_model = kwargs.pop('pretrained_model', None)
 	    self.num_train = kwargs.pop('num_train', None)
-	    # self.test_model = kwargs.pop('test_model', './model/lstm/model-1')
+	    self.test_model = kwargs.pop('test_model', './model/lstm/model-1')
 
 	    # Set optimizer by update rule
-	    if self.update_rule == 'sgd':
-	    	self.optimizer = tf.train.GradientDescentOptimizer
-	    elif self.update_rule == 'momentum':
-	    	self.optimizer = tf.train.MomentumOptimizer
-	    elif self.update_rule == 'adam':
+	    if self.update_rule == 'adam':
 	    	self.optimizer = tf.train.AdamOptimizer
 	    elif self.update_rule == 'rmsprop':
 	    	self.optimizer = tf.train.RMSPropOptimizer
@@ -82,9 +73,11 @@ class VideoSolver(object):
 	    # Train/Val dataset
 	    n_examples = self.num_train
 	    n_iters_per_epoch = int(np.ceil(float(n_examples)/self.batch_size))
-	    features = self.data['features']
+	    frame_features = self.data['frame_features']
+	    player_features = self.data['player_features']
 	    labels = self.data['label']
-	    val_features = self.val_data['features']
+	    val_frame_features = self.val_data['frame_features']
+	    val_player_features = self.val_data['player_features']
 	    n_iters_val = int(np.ceil(float(val_features.shape[0])/self.batch_size))
 
 	    # Build graphs for training model and sampling captions
@@ -131,16 +124,17 @@ class VideoSolver(object):
 
 		    for e in range(self.n_epochs):
 		        rand_idxs = np.random.permutation(n_examples)
-		        features = features[rand_idxs]
+		        frame_features = frame_features[rand_idxs]
 		        player_features = player_features[rand_idxs]
 		        labels = labels[rand_idxs]
 
 	        	for i in range(n_iters_per_epoch):
-			        features_batch = features[i*self.batch_size:(i+1)*self.batch_size]
+			        frame_features_batch = frame_features[i*self.batch_size:(i+1)*self.batch_size]
 			        player_features_batch = player_features[i*self.batch_size:(i+1)*self.batch_size]
 			        labels_batch = labels[i*self.batch_size:(i+1)*self.batch_size]
-
-			        feed_dict = {self.model.features: features_batch,\
+			        
+			        # How to use feed_dict !!!!!!!!!
+			        feed_dict = {self.model.frame_features: frame_features_batch,\
 			         self.model.player_features: player_features_batch, self.model.labels: labels_batch}
 			        _, l = sess.run([train_op, loss], feed_dict)
 			        curr_loss += l
@@ -182,13 +176,14 @@ class VideoSolver(object):
 	    - save_sampled_captions: If True, save sampled captions to pkl file for computing BLEU scores.
 	    '''
 
-	    features = data['features']
+	    frame_features = data['frame_features']
+	    player_features = data['player_features']
 
 	    # Build a graph for sampling captions
 	    alphas, betas, sampled_captions = self.model.build_sampler(max_len=20)    # (N, max_len, L), (N, max_len)
 	    
 	    config = tf.ConfigProto(allow_soft_placement=True)
-	    config.gpu_options.allow_growth = True
+	    config.gpu_options.allow_growth = True # ?????????????
 	    with tf.Session(config=config) as sess:
 	    	saver = tf.train.Saver()
 		    saver.restore(sess, self.test_model)
