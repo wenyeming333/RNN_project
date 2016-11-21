@@ -51,16 +51,19 @@ class Video_Event_dectection():
 		self.weight_initializer = tf.random_normal_initializer(mean=0.0, stddev=0.01)
 		self.const_initializer = tf.constant_initializer(0.0)
 		self.emb_initializer = tf.random_uniform_initializer(minval=-1.0, maxval=1.0)
+		self.reuse = -1
 
 	def _get_initial_lstm(self, features, mode=1):
 		with tf.variable_scope('initial_lstm{}'.format(mode)):
 			features_mean = tf.reduce_mean(features, 1)
             # change self.D to self.M
-			w_h = tf.get_variable('w_h{}'.format(mode), [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
+			#w_h = tf.get_variable('w_h{}'.format(mode), [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
+			w_h = tf.get_variable('w_h{}'.format(mode), [self.dim_embed, self.dim_hidden], initializer=self.weight_initializer)
 			b_h = tf.get_variable('b_h{}'.format(mode), [self.dim_hidden], initializer=self.const_initializer)
 			h = tf.nn.tanh(tf.matmul(features_mean, w_h) + b_h)
 
-			w_c = tf.get_variable('w_c{}'.format(mode), [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
+			#w_c = tf.get_variable('w_c{}'.format(mode), [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
+			w_c = tf.get_variable('w_c{}'.format(mode), [self.dim_embed, self.dim_hidden], initializer=self.weight_initializer)
 			b_c = tf.get_variable('b_c{}'.format(mode), [self.dim_hidden], initializer=self.const_initializer)
 			c = tf.nn.tanh(tf.matmul(features_mean, w_c) + b_c)
 			return c, h
@@ -116,13 +119,13 @@ class Video_Event_dectection():
 		self.em_frame = self._frame_embedding(self.features)
 		self.em_player = self._player_embedding(self.player_features)
 		#reversed_features = tf.nn.rnn._reverse_seq(features, self.ctx_shape[0], 1, batch_dim=0)
-		import pdb
-		pdb.set_trace()
-		reversed_features = tf.reverse_sequence(self.em_frame, self.ctx_shape[0], 1, batch_dim=0)
+		self.sequence_lengths = tf.placeholder('int64', [None])
+		
+		reversed_features = tf.reverse_sequence(self.em_frame, self.sequence_lengths, 1, batch_dim=0)
 
-		c1, h1 = self._get_initial_lstm(features=features, mode=1)
-		c2, h2 = self._get_initial_lstm(features=features, mode=2) # Frame Blstm
-		c3, h3 = self._get_initial_lstm(features=features, mode=3) # Event Lstm
+		self.c1, self.h1 = self._get_initial_lstm(features=reversed_features, mode=1)
+		self.c2, self.h2 = self._get_initial_lstm(features=reversed_features, mode=2) # Frame Blstm
+		self.c3, self.h3 = self._get_initial_lstm(features=reversed_features, mode=3) # Event Lstm
 
 		blstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden)
 		blstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden) # Frame Blstm
@@ -130,14 +133,21 @@ class Video_Event_dectection():
 		loss = 0.0
 
 		for inx in range(self.n_lstm_steps):
-			with tf.variable_scope('blstm', reuse=(t!=0)):
+			#with tf.variable_scope('blstm', reuse=(t!=0)):
+			with tf.variable_scope('blstm', reuse=(self.reuse!=0)):
 				with tf.variable_scope('FW'):
-					_, (c1, h1) = blstm_fw_cell(features[:,inx,:], state = [c1, h1])
+					import pdb
+					pdb.set_trace()
+					#_, (self.c1, self.h1) = blstm_fw_cell(self.features[:,inx,:], state = [self.c1, self.h1])
+					_, (self.c1, self.h1) = blstm_fw_cell(self.features[:,inx,:], state = [self.c1, self.h1])
 				with tf.variable_scope('BW'):
-					_, (c2, h2) = blstm_fw_cell(reversed_features[:,inx,:], state = [c2, h2])
-			frame_features = tf.concat(1, [h1, h2, h3])
-			att_features = tf.concat(2, [player_features, tf.tile(frame_features, [1, 10, 1])])
-			gamma = self._attention_layer(att_features, False, self.N)
+					_, (self.c2, self.h2) = blstm_fw_cell(reversed_features[:,inx,:], state = [self.c2, self.h2])
+					
+			import pdb
+			pdb.set_trace()
+			self.frame_features = tf.concat(1, [self.h1, self.h2, self.h3])
+			self.att_features = tf.concat(2, [self.player_features, tf.tile(self.frame_features, [1, 10, 1])])
+			gamma = self._attention_layer(self.att_features, False, self.N)
 			expected_features = tf.einsum('ij,kjl->il', gamma, player_features)
 			with tf.variables('event_lstm'): 
 				_, (c3, h3) = lstm2_cell(expected_features, state = [c3, h3])
