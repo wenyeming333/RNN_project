@@ -111,25 +111,26 @@ class Video_Event_dectection():
 
 	def build_model(self):
 		#batch_size = tf.shape(features)[0]
-		self.features = tf.placeholder("float32", [None, self.ctx_shape[0], self.ctx_shape[1]])
-		self.player_features = tf.placeholder("float32", self.player_feature_shape)
-		self.labels = tf.placeholder("float32", [None, 11])
+		self.features = tf.placeholder(tf.float32, [None, self.ctx_shape[0], self.ctx_shape[1]])
+		self.player_features = tf.placeholder(tf.float32, self.player_feature_shape)
+		self.labels = tf.placeholder(tf.float32, [None, 11])
 		# mask = tf.placeholder("float32", [self.batch_size, self.n_lstm_steps])
 
 		self.em_frame = self._frame_embedding(self.features)
 		self.em_player = self._player_embedding(self.player_features)
 		#reversed_features = tf.nn.rnn._reverse_seq(features, self.ctx_shape[0], 1, batch_dim=0)
-		self.sequence_lengths = tf.placeholder('int64', [None])
+		self.sequence_lengths = tf.placeholder(tf.int64, [None])
 		
 		reversed_features = tf.reverse_sequence(self.em_frame, self.sequence_lengths, 1, batch_dim=0)
 
-		self.c1, self.h1 = self._get_initial_lstm(features=reversed_features, mode=1)
+		self.c1, self.h1 = self._get_initial_lstm(features=self.em_frame, mode=1)
 		self.c2, self.h2 = self._get_initial_lstm(features=reversed_features, mode=2) # Frame Blstm
+		#self.h1 self.h2 concatenate
 		self.c3, self.h3 = self._get_initial_lstm(features=reversed_features, mode=3) # Event Lstm
 
-		blstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden)
-		blstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden) # Frame Blstm
-		lstm2_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden) # Event Lstm
+		blstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True)
+		blstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True) # Frame Blstm
+		lstm2_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True) # Event Lstm
 		loss = 0.0
 
 		for inx in range(self.n_lstm_steps):
@@ -138,10 +139,13 @@ class Video_Event_dectection():
 				with tf.variable_scope('FW'):
 					import pdb
 					pdb.set_trace()
+					#tf.nn.rnn_cell._linear([self.em_frame[:,inx,:],self.h1],1024,True)
 					#_, (self.c1, self.h1) = blstm_fw_cell(self.features[:,inx,:], state = [self.c1, self.h1])
-					_, (self.c1, self.h1) = blstm_fw_cell(self.features[:,inx,:], state = [self.c1, self.h1])
+					from tensorflow.python.ops import variable_scope as vs
+					vs.get_variable('matrix', [512,1024], dtype=tf.float32)
+					_, self.c1, self.h1 = blstm_fw_cell(self.em_frame[:,inx,:], state=(self.c1, self.h1))
 				with tf.variable_scope('BW'):
-					_, (self.c2, self.h2) = blstm_fw_cell(reversed_features[:,inx,:], state = [self.c2, self.h2])
+					_, (self.c2, self.h2) = blstm_fw_cell(reversed_features[:,inx,:], state=(self.c2, self.h2))
 					
 			import pdb
 			pdb.set_trace()
