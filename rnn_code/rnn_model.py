@@ -45,7 +45,7 @@ class Video_Event_dectection():
 		self.ctx_shape = [20, 2048]
 		self.N = 10
 		self.dim_embed = dim_embed
-		self.player_feature_shape = [None, 10, dim_embed]
+		self.player_feature_shape = [None, 10, 131072]
 		self.dim_ctx = dim_ctx
 		self.dim_hidden = dim_hidden
 		self.n_lstm_steps = n_lstm_steps
@@ -101,9 +101,9 @@ class Video_Event_dectection():
 	def _player_embedding(self, inputs, reuse=False):
 		with tf.variable_scope('player_embedding', reuse=reuse):
 	
-			w = tf.get_variable('w_p', [self.ctx_shape[1], self.dim_embed], initializer=self.emb_initializer)
+			w = tf.get_variable('w_p', [self.player_feature_shape[2], self.dim_embed], initializer=self.emb_initializer)
 			b = tf.Variable(tf.constant(0.0, shape=[self.dim_embed]))
-			inputs = tf.reshape(inputs, (-1, self.ctx_shape[1]))
+			inputs = tf.reshape(inputs, (-1, self.player_feature_shape[2]))
 			#w = tf.get_variable('w_p', [10, self.dim_embed], initializer=self.emb_initializer)
 			#x = tf.nn.embedding_lookup(w, inputs, name='player_vector')  # (N, T, M) or (N, M)
 			x = tf.nn.relu(tf.matmul(inputs, w)+b, name='player_vector')
@@ -251,16 +251,16 @@ class Video_Event_dectection():
 				while next_batch:
 					i += 1
 					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
-					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.ctx_shape[1]], dtype='float32')
+					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.player_feature_shape[2]], dtype='float32')
 					labels_batch = np.zeros([batch_size, 11], dtype='float32')
 					seq_len_batch = 20*np.ones([batch_size])
 					for i, clip_dir in enumerate(next_batch):
 						new_frame_features = np.load(os.path.join(clip_dir, 'frame_features.npy'))
-						new_player_features = np.load(os.path.join(clip_dir, 'player_features.npy'))
+						new_player_features = np.swapaxis(np.load(os.path.join(clip_dir, 'player_features.npy')),0,1)
 						new_event_label = np.load(os.path.join(clip_dir, 'label.npy'))
 						new_seq_len = new_frame_features.shape[0]
 						frame_features_batch[i,:new_frame_features.shape[0],:] = new_frame_features
-						player_features_batch[i,:new_player_features[0],:new_player_features[1],:] = new_player_features
+						player_features_batch[i,:new_player_features[0],:np.min((new_player_features[1],10)),:] = new_player_features
 						labels_batch[i,:] = new_event_label
 						seq_len_batch[i] = new_seq_len
 					
