@@ -53,19 +53,29 @@ class Video_Event_dectection():
 		self.emb_initializer = tf.random_uniform_initializer(minval=-1.0, maxval=1.0)
 		self.reuse = -1
 
-	def _get_initial_lstm(self, features, mode=1):
+	def _get_initial_frame_lstm(self, features, mode=1):
 		with tf.variable_scope('initial_lstm{}'.format(mode)):
 			features_mean = tf.reduce_mean(features, 1)
-            # change self.D to self.M
-			#w_h = tf.get_variable('w_h{}'.format(mode), [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
+            
 			w_h = tf.get_variable('w_h{}'.format(mode), [self.dim_embed, self.dim_hidden], initializer=self.weight_initializer)
 			b_h = tf.get_variable('b_h{}'.format(mode), [self.dim_hidden], initializer=self.const_initializer)
 			h = tf.nn.tanh(tf.matmul(features_mean, w_h) + b_h)
 
-			#w_c = tf.get_variable('w_c{}'.format(mode), [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
 			w_c = tf.get_variable('w_c{}'.format(mode), [self.dim_embed, self.dim_hidden], initializer=self.weight_initializer)
 			b_c = tf.get_variable('b_c{}'.format(mode), [self.dim_hidden], initializer=self.const_initializer)
 			c = tf.nn.tanh(tf.matmul(features_mean, w_c) + b_c)
+			return c, h 
+			
+	def _get_initial_event_lstm(self, hidden_features, mode=1):
+		with tf.variable_scope('initial_lstm{}'.format(mode)):
+			w_h = tf.get_variable('w_h{}'.format(mode), [self.dim_embed*2, self.dim_hidden], initializer=self.weight_initializer)
+			b_h = tf.get_variable('b_h{}'.format(mode), [self.dim_hidden], initializer=self.const_initializer)
+			h = tf.nn.tanh(tf.matmul(hidden_features, w_h) + b_h)
+
+			#w_c = tf.get_variable('w_c{}'.format(mode), [self.dim_ctx, self.dim_hidden], initializer=self.weight_initializer)
+			w_c = tf.get_variable('w_c{}'.format(mode), [self.dim_embed*2, self.dim_hidden], initializer=self.weight_initializer)
+			b_c = tf.get_variable('b_c{}'.format(mode), [self.dim_hidden], initializer=self.const_initializer)
+			c = tf.nn.tanh(tf.matmul(hidden_features, w_c) + b_c)
 			return c, h
 
 	def _frame_embedding(self, inputs, reuse=False):
@@ -91,23 +101,24 @@ class Video_Event_dectection():
 			x = tf.nn.relu(tf.matmul(inputs, w)+b, name='player_vector')
 			return tf.reshape(x, (-1, self.ctx_shape[0], self.dim_embed))
 
-	def _attention_layer(self, features, N=10, reuse=False):
+	def _attention_layer(self, features, reuse=False):
 		with tf.variable_scope('attention_layer', reuse=reuse):
 			# Remember to change the dimension
 			# N is the number of players (10)
 			# features is of [None, N], depend on the hidden state from RNN.
 			# Multiplied by scalar 4 because we have fw, bw, and event hidden features.
-			w = tf.get_variable('w_a', [None, self.N, 4 * self.dim_hidden], initializer=self.weight_initializer)
-			b = tf.get_variable('b_a', [None, N], initializer=self.const_initializer)
-			v = tf.get_variable('v_a', [None, self.dim_hidden, self.N], initializer=self.weight_initializer)
-			gamma = tf.nn.softmax(tf.batch_matmul(tf.tanh(tf.batch_matmul(features,w) + b),v))
-			return gamma
+			w = tf.get_variable('w_a', [4 * self.dim_hidden, self.N], initializer=self.weight_initializer)
+			b = tf.Variable(tf.constant(0.0, shape=[self.N]))
+			# v = tf.get_variable('v_a', [self.dim_hidden, self.N], initializer=self.weight_initializer)
+			features = tf.reshape(features, (-1, 4 * self.dim_hidden))
+			# gamma = tf.nn.softmax(tf.batch_matmul(tf.tanh(tf.matmul(features, w) + b), v))
+			return tf.nn.softmax(tf.tanh(tf.matmul(features, w) + b))
 
-	def _prediction_layer(self, features, N=10, reuse=False):
-		with tf.variable_scope('attention_layer', reuse=reuse):
+	def _prediction_layer(self, features, reuse=False):
+		with tf.variable_scope('prediction_layer', reuse=reuse):
 			# We have 11 classes of events.
-			w = tf.get_variable('w_p', [None, 11, self.dim_hidden], initializer=self.weight_initializer)
-			return tf.batch_matmul(w, features)
+			w = tf.get_variable('w_p', [self.dim_hidden, 11], initializer=self.weight_initializer)
+			return tf.matmul(features, w)
 
 	def build_model(self):
 		#batch_size = tf.shape(features)[0]
@@ -123,49 +134,46 @@ class Video_Event_dectection():
 		
 		reversed_features = tf.reverse_sequence(self.em_frame, self.sequence_lengths, 1, batch_dim=0)
 
-		self.c1, self.h1 = self._get_initial_lstm(features=self.em_frame, mode=1)
-		self.c2, self.h2 = self._get_initial_lstm(features=reversed_features, mode=2) # Frame Blstm
-		#self.h1 self.h2 concatenate
-		self.c3, self.h3 = self._get_initial_lstm(features=reversed_features, mode=3) # Event Lstm
+		self.c1, self.h1 = self._get_initial_frame_lstm(features=self.em_frame, mode=1)
+		self.c2, self.h2 = self._get_initial_frame_lstm(features=reversed_features, mode=2) # Frame Blstm
+		self.c3, self.h3 = self._get_initial_event_lstm(hidden_features=tf.concat(1, [self.h1, self.h2]),
+														mode=3) # Event Lstm
 
 		blstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True)
 		blstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True) # Frame Blstm
 		lstm2_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True) # Event Lstm
 		loss = 0.0
+		
+		from util.spec_math_ops import *
 
 		for inx in range(self.n_lstm_steps):
-			#with tf.variable_scope('blstm', reuse=(t!=0)):
-			with tf.variable_scope('blstm', reuse=(self.reuse!=0)):
-				with tf.variable_scope('FW'):
-					import pdb
-					pdb.set_trace()
-					#tf.nn.rnn_cell._linear([self.em_frame[:,inx,:],self.h1],1024,True)
-					#_, (self.c1, self.h1) = blstm_fw_cell(self.features[:,inx,:], state = [self.c1, self.h1])
-					from tensorflow.python.ops import variable_scope as vs
-					vs.get_variable('matrix', [512,1024], dtype=tf.float32)
-					_, self.c1, self.h1 = blstm_fw_cell(self.em_frame[:,inx,:], state=(self.c1, self.h1))
-				with tf.variable_scope('BW'):
+			reuse = (inx!=0)
+			with tf.variable_scope('blstm', reuse): ## reuse means?
+				with tf.variable_scope('FW') as scope:
+					if reuse: scope.reuse_variables()
+					_, (self.c1, self.h1) = blstm_fw_cell(self.em_frame[:,inx,:], state=(self.c1, self.h1))
+				with tf.variable_scope('BW') as scope:
+					if reuse: scope.reuse_variables() 
 					_, (self.c2, self.h2) = blstm_fw_cell(reversed_features[:,inx,:], state=(self.c2, self.h2))
 					
-			import pdb
-			pdb.set_trace()
 			self.frame_features = tf.concat(1, [self.h1, self.h2, self.h3])
-			self.att_features = tf.concat(2, [self.player_features, tf.tile(self.frame_features, [1, 10, 1])])
-			gamma = self._attention_layer(self.att_features, False, self.N)
-			expected_features = tf.einsum('ij,kjl->il', gamma, player_features)
-			with tf.variables('event_lstm'): 
-				_, (c3, h3) = lstm2_cell(expected_features, state = [c3, h3])
-			prediction_value = self._prediction_layer(h3)
+			reshape_frame_features = tf.reshape(self.frame_features, (-1, 1, 768))
+			self.att_features = tf.concat(2, [self.player_features, tf.tile(reshape_frame_features, [1, 10, 1])])
+			gamma = self._attention_layer(self.att_features, reuse)
+			
+			expected_features = tf.einsum('ij,kjl->il', gamma, self.player_features)
+			with tf.variable_scope('event_lstm') as scope:
+				if reuse: scope.reuse_variables()
+				_, (self.c3, self.h3) = lstm2_cell(expected_features, state = (self.c3, self.h3))
+			prediction_value = self._prediction_layer(self.h3, reuse)
 
-			error_mat = tf.sub(tf.ones([prediction_value[0].get_shape().as_list()[0], 11]), labels)
+			error_mat = tf.sub(tf.ones([prediction_value[0].get_shape().as_list()[0], 11]), self.labels)
 			loss += tf.square(tf.nn.relu(1 - tf.mul(error_mat, prediction_value)))
 		loss *= 0.5
 		return loss
 
 # Debug
 if __name__ == '__main__':
-	import pdb
-	pdb.set_trace()
 	cell = Video_Event_dectection()
 	cell.build_model()
-	pdb.set_trace()
+
