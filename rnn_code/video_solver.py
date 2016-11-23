@@ -19,9 +19,6 @@ class VideoSolver(object):
 			- player_features: Feature vectors of shape (, , ,)
 	        - labels: ....................
 	        - file_names: Image file names of shape (82783, )
-	        - captions: Captions of shape (400131, 17) 
-	        - image_idxs: Indices for mapping caption to image of shape (400131, ) 
-	        - word_to_idx: Mapping dictionary from word to index 
 	    - val_data: validation data; for print out BLEU scores for each epoch.
 	    Optional Arguments:
 	    - n_epochs: The number of epochs to run for training.
@@ -188,7 +185,8 @@ class VideoSolver(object):
 	    	saver = tf.train.Saver()
 		    saver.restore(sess, self.test_model)
 		    _, features_batch, image_files = sample_coco_minibatch(data, self.batch_size)
-		    feed_dict = { self.model.features: features_batch }
+		    feed_dict = {self.model.frame_features: frame_features_batch,\
+			         self.model.player_features: player_features_batch, self.model.labels: labels_batch}
 		    alps, bts, sam_cap = sess.run([alphas, betas, sampled_captions], feed_dict)  # (N, max_len, L), (N, max_len)
 		    decoded = decode_captions(sam_cap, self.model.idx_to_word)
 
