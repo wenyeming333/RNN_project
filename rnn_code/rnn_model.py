@@ -142,7 +142,7 @@ class Video_Event_dectection():
 		blstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True)
 		blstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True) # Frame Blstm
 		lstm2_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True) # Event Lstm
-		loss = 0.0
+		self.loss = 0.0
 		
 		from util.spec_math_ops import *
 
@@ -165,12 +165,19 @@ class Video_Event_dectection():
 			with tf.variable_scope('event_lstm') as scope:
 				if reuse: scope.reuse_variables()
 				_, (self.c3, self.h3) = lstm2_cell(expected_features, state = (self.c3, self.h3))
-			prediction_value = self._prediction_layer(self.h3, reuse)
+			self.prediction_value = self._prediction_layer(self.h3, reuse)
 
-			error_mat = tf.sub(tf.ones([prediction_value[0].get_shape().as_list()[0], 11]), self.labels)
-			loss += tf.square(tf.nn.relu(1 - tf.mul(error_mat, prediction_value)))
-		loss *= 0.5
-		return loss
+			#self.error_mat = tf.sub(tf.ones([self.prediction_value[0].get_shape().as_list()[0], 11]), self.labels)
+			
+			self.error_mat = 1 - self.labels
+			self.loss += tf.square(tf.nn.relu(1 - tf.mul(self.error_mat, self.prediction_value)))
+			
+		
+		self.loss *= 0.5
+		self.loss = tf.reduce_mean(tf.reduce_sum(self.loss,1))
+		
+		
+		return self.loss
 
 # Debug
 if __name__ == '__main__':
