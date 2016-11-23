@@ -247,6 +247,7 @@ class Video_Event_dectection():
 			for e in range(self.n_epochs):
 				print "epoch {}".format(e)
 				next_batch = self.data.next_batch_generator()
+				next_batch = ["/ais/gobi4/basketball/olga_ethan_features/IKTBGSIwA_o/clip_1"] * batch_size 
 				i = 0
 				while next_batch:
 					i += 1
