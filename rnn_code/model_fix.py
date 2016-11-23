@@ -213,7 +213,7 @@ class Video_Event_dectection():
 
 			if self.pretrained_model is not None:
 				print "Start training with pretrained Model.."
-				saver.restore(sess, pretrained_model)
+				saversaver.restore(sess, pretrained_model)
 
 			prev_loss = -1
 			curr_loss = 0

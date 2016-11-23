@@ -8,6 +8,8 @@ import pandas as pd
 import cPickle
 from keras.preprocessing import sequence
 
+from variables import *
+
 slim = tf.contrib.slim 
 slim_predict = tf.contrib.slim
 # =========================================================================================
@@ -52,6 +54,11 @@ class Video_Event_dectection():
 		self.const_initializer = tf.constant_initializer(0.0)
 		self.emb_initializer = tf.random_uniform_initializer(minval=-1.0, maxval=1.0)
 		self.reuse = -1
+		self.set_data()
+		
+	def set_data(self):
+		from util.setData import RNNData
+		self.data = RNNData(data_dir, action_path, features_dir)
 
 	def _get_initial_frame_lstm(self, features, mode=1):
 		with tf.variable_scope('initial_lstm{}'.format(mode)):
@@ -77,6 +84,7 @@ class Video_Event_dectection():
 			b_c = tf.get_variable('b_c{}'.format(mode), [self.dim_hidden], initializer=self.const_initializer)
 			c = tf.nn.tanh(tf.matmul(hidden_features, w_c) + b_c)
 			return c, h
+		
 
 	def _frame_embedding(self, inputs, reuse=False):
 		with tf.variable_scope('frame_embedding', reuse=reuse):
@@ -154,7 +162,7 @@ class Video_Event_dectection():
 					_, (self.c1, self.h1) = blstm_fw_cell(self.em_frame[:,inx,:], state=(self.c1, self.h1))
 				with tf.variable_scope('BW') as scope:
 					if reuse: scope.reuse_variables() 
-					_, (self.c2, self.h2) = blstm_fw_cell(reversed_features[:,inx,:], state=(self.c2, self.h2))
+					_, (self.c2, self.h2) = blstm_bw_cell(reversed_features[:,inx,:], state=(self.c2, self.h2))
 					
 			self.frame_features = tf.concat(1, [self.h1, self.h2, self.h3])
 			reshape_frame_features = tf.reshape(self.frame_features, (-1, 1, 768))
@@ -171,13 +179,116 @@ class Video_Event_dectection():
 			
 			self.error_mat = 1 - self.labels
 			self.loss += tf.square(tf.nn.relu(1 - tf.mul(self.error_mat, self.prediction_value)))
-			
-		
+
 		self.loss *= 0.5
 		self.loss = tf.reduce_mean(tf.reduce_sum(self.loss,1))
-		
-		
+
 		return self.loss
+		
+	def run_model(self, **kwargs):
+
+		# pop out parameters.
+		n_epochs = kwargs.pop('n_epochs', 10)
+		batch_size = kwargs.pop('batch_size', 100)
+		learning_rate = kwargs.pop('learning_rate', 0.01)
+		print_every = kwargs.pop('print_every', 100)
+		save_every = kwargs.pop('save_every', 1)
+		log_path = kwargs.pop('log_path', './log/')
+		model_path = kwargs.pop('model_path', './model/')
+		pretrained_model = kwargs.pop('pretrained_model', None)
+
+		if not os.path.exists(self.model_path):
+			os.makedirs(self.model_path)
+		if not os.path.exists(self.log_path):
+			os.makedirs(self.log_path)
+
+		# Build graphs for training model and sampling captions
+		loss = self.model.build_model()
+		tf.get_variable_scope().reuse_variables()
+
+		self.optimizer = tf.train.AdamOptimizer
+
+		# Train op
+		with tf.name_scope('optimizer'):
+			optimizer = self.optimizer(learning_rate = learning_rate)
+			grads = tf.gradients(loss, tf.trainable_variables())
+			grads_and_vars = list(zip(grads, tf.trainable_variables())) # ?????
+			train_op = optimizer.apply_gradients(grads_and_vars = grads_and_vars)
+		   
+		# Summary op
+		tf.scalar_summary('batch_loss', loss)
+		for var in tf.trainable_variables():
+			tf.histogram_summary(var.op.name, var)
+		for grad, var in grads_and_vars:
+			tf.histogram_summary(var.op.name+'/gradient', grad)
+		
+		summary_op = tf.merge_all_summaries()
+
+		print "The number of epoch: %d" %n_epochs
+ 		print "Batch size: %d" %batch_size
+		
+		config = tf.ConfigProto(allow_soft_placement = True)
+		#config.gpu_options.per_process_gpu_memory_fraction=0.9
+		config.gpu_options.allow_growth = True
+
+		with tf.Session(config=config) as sess:
+			tf.initialize_all_variables().run()
+			summary_writer = tf.train.SummaryWriter(self.log_path, graph=tf.get_default_graph())
+			saver = tf.train.Saver(max_to_keep=40)
+
+			if self.pretrained_model is not None:
+				print "Start training with pretrained Model.."
+				saversaver.restore(sess, pretrained_model)
+
+			prev_loss = -1
+			curr_loss = 0
+			start_t = time.time()
+
+			for e in range(self.n_epochs):
+				print "epoch {}".format(e)
+				next_batch = self.data.next_batch_generator()
+				i = 0
+				while next_batch:
+					i += 1
+					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
+					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.ctx_shape[1]], dtype='float32')
+					labels_batch = np.zeros([batch_size, 11], dtype='float32')
+					seq_len_batch = 20*np.ones([batch_size])
+					for i, clip_dir in enumerate(next_batch):
+						new_frame_features = np.load(os.path.join(clip_dir, 'frame_features.npy'))
+						new_player_features = np.load(os.path.join(clip_dir, 'player_features.npy'))
+						new_event_label = np.load(os.path.join(clip_dir, 'label.npy'))
+						new_seq_len = new_frame_features.shape[0]
+						frame_features_batch[i,:new_frame_features.shape[0],:] = new_frame_features
+						player_features_batch[i,:new_player_features[0],:new_player_features[1],:] = new_player_features
+						labels_batch[i,:] = new_event_label
+						seq_len_batch[i] = new_seq_len
+					
+					# How to use feed_dict !!!!!!!!!
+					feed_dict = {self.model.frame_features: frame_features_batch,\
+					 self.model.player_features: player_features_batch, \
+					 self.model.labels: labels_batch, self.sequence_lengths: seq_len_batch}
+					_, l = sess.run([train_op, loss], feed_dict)
+					curr_loss += l
+
+					if i % 10 == 0:
+						summary = sess.run(summary_op, feed_dict)
+						summary_writer.add_summary(summary, e*n_iters_per_epoch + i)
+
+					if (i+1) % self.print_every == 0:
+						print "\nTrain loss at epoch %d & iteration %d (mini-batch): %.5f" %(e+1, i+1, l)
+
+
+				print "Previous epoch loss: ", prev_loss
+				print "Current epoch loss: ", curr_loss
+				print "Elapsed time: ", time.time() - start_t
+
+				if (e+1) % self.save_every == 0:
+					saver.save(sess, os.path.join(self.model_path, 'model'), global_step=e+1)
+					print "model-%s saved." %(e+1)
+			
+				prev_loss = curr_loss
+				curr_loss = 0
 
 # Debug
 if __name__ == '__main__':

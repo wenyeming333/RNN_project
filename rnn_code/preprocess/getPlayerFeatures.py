@@ -12,7 +12,7 @@ def load_model(include_top=False):
 #for layer_i in range(len(base_model.layers)):
 #	print layer_i, base_model.layers[layer_i].output_shape
 
-def load_get_output_fn(model, num_layer=200):
+def load_get_output_fn(model, num_layer=217):
 	fn = K.function([model.layers[0].input, 
 					 K.learning_phase()],
 					[model.layers[num_layer].output])

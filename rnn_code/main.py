@@ -47,7 +47,7 @@ def savePlayerFeatures():
 					
 	model = load_model()
 					
-	load_features = load_get_output_fn(model)
+	load_features = load_get_output_fn(model, num_layer=216)
 					
 	for v in videos:
 	
@@ -63,7 +63,9 @@ def savePlayerFeatures():
 			
 			clip_features = {}
 			clip_path = '{}/{}'.format(video_path, clip)
+			unique_ids = {}
 			for i in xrange(images.shape[0]):
+				
 				im = images[i,...]
 				csv_path = im_dir[i][:im_dir[i].rfind('/')] + '/{:02}_info.csv'.format(i+1)
 				im_csv = load_im_csv(csv_path)
@@ -81,24 +83,36 @@ def savePlayerFeatures():
 				y_upper[y_upper>im_shape[-2]] = im_shape[-2]
 				
 				clip_features[i] = {}
+				
 				for r_i in range(len(im_csv)):
-					
-					im_crop = np.swapaxes(im[:,y[r_i]:y_upper[r_i],
-										x[r_i]:x_upper[r_i]], 0,2)
-					
 					try:
-						im_crop = np.swapaxes(resize(im_crop, (299,299)),
-											0,2)[np.newaxis,...]
+						im_crop = np.swapaxes(im[:,y[r_i]:y_upper[r_i],
+											x[r_i]:x_upper[r_i]], 0,2)
 						
+						im_crop = np.swapaxes(resize(im_crop, (299,299)),
+												0,2)[np.newaxis,...]
+							
 						feature = load_features([im_crop, 0])[0]
 						clip_features[i][im_csv.id[r_i]] = feature.flatten()
+						if im_csv.id[r_i] not in unique_ids:
+							feature_shape = feature.size
+							unique_ids[im_csv.id[r_i]] = np.zeros((i, feature_shape))
+						unique_ids[im_csv.id[r_i]] = np.concatenate((unique_ids[im_csv.id[r_i]],
+																	feature.flatten()[np.newaxis,...]))
 					except Exception as e:
-						print e 
-						pass
+						print e
 						
-					  
+																
+			n_ids = len(unique_ids)
 			
-			Pickle.dump(clip_features, open('{}/player_info.pkl'.format(clip_path), 'w'))
+			player_features = np.zeros((n_ids, images.shape[0], feature_shape))
+			
+			for i, (p_id, features) in enumerate(unique_ids.iteritems()):
+				player_features[i,:features.shape[0],:] = features 				
+				
+			
+			Pickle.dump(clip_features, open('{}/player_features.pkl'.format(clip_path), 'w'))
+			np.save('{}/player_features.npy'.format(clip_path),player_features)
 			print ('\tFinish clip: {}'.format(clip))
 	
 def main():
