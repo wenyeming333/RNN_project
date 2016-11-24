@@ -54,8 +54,12 @@ class Video_Event_dectection():
 		self.weight_initializer = tf.random_normal_initializer(mean=0.0, stddev=0.01)
 		self.const_initializer = tf.constant_initializer(0.0)
 		self.emb_initializer = tf.random_uniform_initializer(minval=-1.0, maxval=1.0)
-		self.reuse = -1
+		# self.reuse = -1
 		self.set_data()
+		with open('/ais/gobi4/basketball/labels_dict.pkl') as f:
+			self.labels_dict = cPickle.load(f)
+		with open('/ais/gobi4/basketball/olga_ethan_features/event_labels.pkl') as f:
+			self.global_labels = cPickle.load(f)
 		
 	def set_data(self):
 		from util.setData import RNNData
@@ -199,12 +203,12 @@ class Video_Event_dectection():
 
 		# pop out parameters.
 		n_epochs = kwargs.pop('n_epochs', 10)
-		batch_size = kwargs.pop('batch_size', 4)
+		batch_size = kwargs.pop('batch_size', 2)
 		learning_rate = kwargs.pop('learning_rate', 0.01)
-		print_every = kwargs.pop('print_every', 100)
+		print_every = kwargs.pop('print_every', 5)
 		save_every = kwargs.pop('save_every', 1)
-		log_path = kwargs.pop('log_path', './log/')
-		model_path = kwargs.pop('model_path', './model/')
+		log_path = kwargs.pop('log_path', '/ais/gobi4/basketball/RNN_log/')
+		model_path = kwargs.pop('model_path', '/ais/gobi4/basketball/RNN_model/')
 		pretrained_model = kwargs.pop('pretrained_model', None)
 
 		if not os.path.exists(model_path):
@@ -226,14 +230,14 @@ class Video_Event_dectection():
 			train_op = optimizer.apply_gradients(grads_and_vars = grads_and_vars)
 		   
 		# Summary op
-		#tf.scalar_summary('batch_loss', loss)
+		tf.scalar_summary('batch_loss', loss)
 		
-		#for var in tf.trainable_variables():
-		#	tf.histogram_summary(var.op.name, var)
-		#for grad, var in grads_and_vars:
-		#	tf.histogram_summary(var.op.name+'/gradient', grad)
+		for var in tf.trainable_variables():
+			tf.histogram_summary(var.op.name, var)
+		for grad, var in grads_and_vars:
+			tf.histogram_summary(var.op.name+'/gradient', grad)
 		
-		#summary_op = tf.merge_all_summaries()
+		summary_op = tf.merge_all_summaries()
 
 		print "The number of epoch: %d" %n_epochs
  		print "Batch size: %d" %batch_size
@@ -244,7 +248,7 @@ class Video_Event_dectection():
 
 		with tf.Session(config=config) as sess:
 			tf.initialize_all_variables().run()
-			#summary_writer = tf.train.SummaryWriter(self.log_path, graph=tf.get_default_graph())
+			summary_writer = tf.train.SummaryWriter(log_path, graph=tf.get_default_graph())
 			saver = tf.train.Saver(max_to_keep=40)
 
 			if pretrained_model is not None:
@@ -261,25 +265,27 @@ class Video_Event_dectection():
 				next_batch = ["/ais/gobi4/basketball/olga_ethan_features/IKTBGSIwA_o/clip_1"] * batch_size 
 				i = 0
 				while next_batch:
+					if i == 15: break
 					i += 1
 					print i
 					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
 					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.player_feature_shape[3]], dtype='float32')
 					labels_batch = np.zeros([batch_size, 11], dtype='float32')
-					labels_batch[0,0] = 1
-					labels_batch[1,0] = 1
 					seq_len_batch = 20*np.ones([batch_size])
-					for i, clip_dir in enumerate(next_batch):
+					for j, clip_dir in enumerate(next_batch):
+						video_name, clip_id = clip_dir.split('/')[-2], clip_dir.split('/')[-1]
+						class_name = self.global_labels[video_name][clip_id]
+						labels_batch[j, self.labels_dict.index(class_name)] = 1
 						new_frame_features = np.load(os.path.join(clip_dir, 'frame_features.npy'))
 						new_player_features = np.swapaxes(np.load(os.path.join(clip_dir, 'player_features.npy')),0,1)
 						#new_event_label = np.load(os.path.join(clip_dir, 'label.npy'))
 						new_seq_len = new_frame_features.shape[0]
-						frame_features_batch[i,:new_frame_features.shape[0],:] = new_frame_features
+						frame_features_batch[j,:new_frame_features.shape[0],:] = new_frame_features
 						num_player = new_player_features.shape[1]
-						player_features_batch[i,:20,:10,:] = new_player_features[:,:10,:]
+						player_features_batch[j,:20,:10,:] = new_player_features[:,:10,:]
 						#labels_batch[i,:] = new_event_label
-						seq_len_batch[i] = new_seq_len
-					
+						seq_len_batch[j] = new_seq_len
+					print labels_batch
 					# How to use feed_dict !!!!!!!!!
 					feed_dict = {self.features: frame_features_batch,\
 					 self.player_features: player_features_batch, \
@@ -300,8 +306,8 @@ class Video_Event_dectection():
 				print "Current epoch loss: ", curr_loss
 				print "Elapsed time: ", time.time() - start_t
 
-				if (e+1) % self.save_every == 0:
-					saver.save(sess, os.path.join(self.model_path, 'model'), global_step=e+1)
+				if (e+1) % save_every == 0:
+					saver.save(sess, os.path.join(model_path, 'model'), global_step=e+1)
 					print "model-%s saved." %(e+1)
 			
 				prev_loss = curr_loss
