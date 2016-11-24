@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import cPickle
 from keras.preprocessing import sequence
+import time
 
 from variables import *
 
@@ -45,7 +46,7 @@ class Video_Event_dectection():
 		self.ctx_shape = [20, 2048]
 		self.N = 10
 		self.dim_embed = dim_embed
-		self.player_feature_shape = [None, 10, 131072]
+		self.player_feature_shape = [None, 20, 10, 131072]
 		self.dim_ctx = dim_ctx
 		self.dim_hidden = dim_hidden
 		self.n_lstm_steps = n_lstm_steps
@@ -97,17 +98,18 @@ class Video_Event_dectection():
 			
 			return tf.reshape(x, (-1, self.ctx_shape[0], self.dim_embed))
 
-	# dimension!!!!!!! [20,10,self.dim_embed] ????????????
+	# dimension!!!!!!! [None, 20,10,self.dim_embed] ????????????
 	def _player_embedding(self, inputs, reuse=False):
 		with tf.variable_scope('player_embedding', reuse=reuse):
-	
-			w = tf.get_variable('w_p', [self.player_feature_shape[2], self.dim_embed], initializer=self.emb_initializer)
+			
+			w = tf.get_variable('w_p', [self.player_feature_shape[3], self.dim_embed], initializer=self.emb_initializer)
 			b = tf.Variable(tf.constant(0.0, shape=[self.dim_embed]))
-			inputs = tf.reshape(inputs, (-1, self.player_feature_shape[2]))
+			inputs = tf.reshape(inputs, (-1, self.player_feature_shape[3]))
 			#w = tf.get_variable('w_p', [10, self.dim_embed], initializer=self.emb_initializer)
 			#x = tf.nn.embedding_lookup(w, inputs, name='player_vector')  # (N, T, M) or (N, M)
 			x = tf.nn.relu(tf.matmul(inputs, w)+b, name='player_vector')
-			return tf.reshape(x, (-1, self.ctx_shape[0], self.dim_embed))
+			return tf.reshape(x, (-1, self.ctx_shape[0], 10, self.dim_embed))
+			
 
 	def _attention_layer(self, features, reuse=False):
 		with tf.variable_scope('attention_layer', reuse=reuse):
@@ -115,12 +117,16 @@ class Video_Event_dectection():
 			# N is the number of players (10)
 			# features is of [None, N], depend on the hidden state from RNN.
 			# Multiplied by scalar 4 because we have fw, bw, and event hidden features.
-			w = tf.get_variable('w_a', [4 * self.dim_hidden, self.N], initializer=self.weight_initializer)
-			b = tf.Variable(tf.constant(0.0, shape=[self.N]))
+			w = tf.get_variable('w_a', [4 * self.dim_hidden, 1], initializer=self.weight_initializer)
+			b = tf.Variable(tf.constant(0.0, shape=[1]))
 			# v = tf.get_variable('v_a', [self.dim_hidden, self.N], initializer=self.weight_initializer)
 			features = tf.reshape(features, (-1, 4 * self.dim_hidden))
 			# gamma = tf.nn.softmax(tf.batch_matmul(tf.tanh(tf.matmul(features, w) + b), v))
-			return tf.nn.softmax(tf.tanh(tf.matmul(features, w) + b))
+			#return tf.nn.softmax(tf.tanh(tf.matmul(features, w) + b))
+			em_features = tf.matmul(features, w) + b
+			em_features = tf.reshape(em_features, (-1, 10))
+			
+			return tf.nn.softmax(em_features)
 
 	def _prediction_layer(self, features, reuse=False):
 		with tf.variable_scope('prediction_layer', reuse=reuse):
@@ -166,10 +172,14 @@ class Video_Event_dectection():
 					
 			self.frame_features = tf.concat(1, [self.h1, self.h2, self.h3])
 			reshape_frame_features = tf.reshape(self.frame_features, (-1, 1, 768))
-			self.att_features = tf.concat(2, [self.player_features, tf.tile(reshape_frame_features, [1, 10, 1])])
+			self.att_features = tf.concat(2, [self.em_player[:,inx,:,:], tf.tile(reshape_frame_features, [1, 10, 1])])
 			gamma = self._attention_layer(self.att_features, reuse)
+			#expected_features = tf.einsum('ij,kjl->il', gamma, self.em_player[:,inx,:,:])
 			
-			expected_features = tf.einsum('ij,kjl->il', gamma, self.player_features)
+			#expected_features = tf.ones([4,256])
+			new_gamma = tf.expand_dims(gamma, 2)
+			expected_features = tf.reduce_sum(tf.mul(new_gamma, self.em_player[:,inx,:,:]),1)
+			
 			with tf.variable_scope('event_lstm') as scope:
 				if reuse: scope.reuse_variables()
 				_, (self.c3, self.h3) = lstm2_cell(expected_features, state = (self.c3, self.h3))
@@ -189,7 +199,7 @@ class Video_Event_dectection():
 
 		# pop out parameters.
 		n_epochs = kwargs.pop('n_epochs', 10)
-		batch_size = kwargs.pop('batch_size', 100)
+		batch_size = kwargs.pop('batch_size', 4)
 		learning_rate = kwargs.pop('learning_rate', 0.01)
 		print_every = kwargs.pop('print_every', 100)
 		save_every = kwargs.pop('save_every', 1)
@@ -197,13 +207,13 @@ class Video_Event_dectection():
 		model_path = kwargs.pop('model_path', './model/')
 		pretrained_model = kwargs.pop('pretrained_model', None)
 
-		if not os.path.exists(self.model_path):
-			os.makedirs(self.model_path)
-		if not os.path.exists(self.log_path):
-			os.makedirs(self.log_path)
+		if not os.path.exists(model_path):
+			os.makedirs(model_path)
+		if not os.path.exists(log_path):
+			os.makedirs(log_path)
 
 		# Build graphs for training model and sampling captions
-		loss = self.model.build_model()
+		loss = self.build_model()
 		tf.get_variable_scope().reuse_variables()
 
 		self.optimizer = tf.train.AdamOptimizer
@@ -216,13 +226,14 @@ class Video_Event_dectection():
 			train_op = optimizer.apply_gradients(grads_and_vars = grads_and_vars)
 		   
 		# Summary op
-		tf.scalar_summary('batch_loss', loss)
-		for var in tf.trainable_variables():
-			tf.histogram_summary(var.op.name, var)
-		for grad, var in grads_and_vars:
-			tf.histogram_summary(var.op.name+'/gradient', grad)
+		#tf.scalar_summary('batch_loss', loss)
 		
-		summary_op = tf.merge_all_summaries()
+		#for var in tf.trainable_variables():
+		#	tf.histogram_summary(var.op.name, var)
+		#for grad, var in grads_and_vars:
+		#	tf.histogram_summary(var.op.name+'/gradient', grad)
+		
+		#summary_op = tf.merge_all_summaries()
 
 		print "The number of epoch: %d" %n_epochs
  		print "Batch size: %d" %batch_size
@@ -233,10 +244,10 @@ class Video_Event_dectection():
 
 		with tf.Session(config=config) as sess:
 			tf.initialize_all_variables().run()
-			summary_writer = tf.train.SummaryWriter(self.log_path, graph=tf.get_default_graph())
+			#summary_writer = tf.train.SummaryWriter(self.log_path, graph=tf.get_default_graph())
 			saver = tf.train.Saver(max_to_keep=40)
 
-			if self.pretrained_model is not None:
+			if pretrained_model is not None:
 				print "Start training with pretrained Model.."
 				saversaver.restore(sess, pretrained_model)
 
@@ -244,39 +255,44 @@ class Video_Event_dectection():
 			curr_loss = 0
 			start_t = time.time()
 
-			for e in range(self.n_epochs):
+			for e in range(n_epochs):
 				print "epoch {}".format(e)
-				next_batch = self.data.next_batch_generator()
+				#next_batch = self.data.next_batch_generator(batch_size)
 				next_batch = ["/ais/gobi4/basketball/olga_ethan_features/IKTBGSIwA_o/clip_1"] * batch_size 
 				i = 0
 				while next_batch:
 					i += 1
+					print i
 					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
-					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.player_feature_shape[2]], dtype='float32')
+					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.player_feature_shape[3]], dtype='float32')
 					labels_batch = np.zeros([batch_size, 11], dtype='float32')
+					labels_batch[0,0] = 1
+					labels_batch[1,0] = 1
 					seq_len_batch = 20*np.ones([batch_size])
 					for i, clip_dir in enumerate(next_batch):
 						new_frame_features = np.load(os.path.join(clip_dir, 'frame_features.npy'))
-						new_player_features = np.swapaxis(np.load(os.path.join(clip_dir, 'player_features.npy')),0,1)
-						new_event_label = np.load(os.path.join(clip_dir, 'label.npy'))
+						new_player_features = np.swapaxes(np.load(os.path.join(clip_dir, 'player_features.npy')),0,1)
+						#new_event_label = np.load(os.path.join(clip_dir, 'label.npy'))
 						new_seq_len = new_frame_features.shape[0]
 						frame_features_batch[i,:new_frame_features.shape[0],:] = new_frame_features
-						player_features_batch[i,:new_player_features[0],:np.min((new_player_features[1],10)),:] = new_player_features
-						labels_batch[i,:] = new_event_label
+						num_player = new_player_features.shape[1]
+						player_features_batch[i,:20,:10,:] = new_player_features[:,:10,:]
+						#labels_batch[i,:] = new_event_label
 						seq_len_batch[i] = new_seq_len
 					
 					# How to use feed_dict !!!!!!!!!
-					feed_dict = {self.model.frame_features: frame_features_batch,\
-					 self.model.player_features: player_features_batch, \
-					 self.model.labels: labels_batch, self.sequence_lengths: seq_len_batch}
+					feed_dict = {self.features: frame_features_batch,\
+					 self.player_features: player_features_batch, \
+					 self.labels: labels_batch, self.sequence_lengths: seq_len_batch}
+					
 					_, l = sess.run([train_op, loss], feed_dict)
 					curr_loss += l
 
-					if i % 10 == 0:
-						summary = sess.run(summary_op, feed_dict)
-						summary_writer.add_summary(summary, e*n_iters_per_epoch + i)
+					#if i % 10 == 0:
+					#	summary = sess.run(summary_op, feed_dict)
+					#	summary_writer.add_summary(summary, e*n_iters_per_epoch + i)
 
-					if (i+1) % self.print_every == 0:
+					if (i+1) % print_every == 0:
 						print "\nTrain loss at epoch %d & iteration %d (mini-batch): %.5f" %(e+1, i+1, l)
 
 
@@ -294,5 +310,6 @@ class Video_Event_dectection():
 # Debug
 if __name__ == '__main__':
 	cell = Video_Event_dectection()
-	cell.build_model()
+	#cell.build_model()
+	cell.run_model()
 
