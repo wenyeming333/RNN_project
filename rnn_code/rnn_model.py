@@ -247,7 +247,8 @@ class Video_Event_dectection():
 		   
 		# Summary op
 		tf.scalar_summary('batch_loss', self.loss)
-		
+		tf.scalar_summary('accuracy', self.accuracy)
+
 		for var in tf.trainable_variables():
 			tf.histogram_summary(var.op.name, var)
 		for grad, var in grads_and_vars:
@@ -317,13 +318,14 @@ class Video_Event_dectection():
 					print curr_loss
 					curr_loss += l
 
-					if i % 10 == 0:
+					if i % 1 == 0:
 						summary = sess.run(summary_op, feed_dict)
+						n_iters_per_epoch = len(current_videos_clips) // batch_size
 						summary_writer.add_summary(summary, e*n_iters_per_epoch + i)
 
 					if (i+1) % print_every == 0:
 						print "[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, acc: %.5f" %(e+1, i+1, l, acc)
-						with open(log_path+model_name+'.log', 'ab') as f:
+						with open(log_path+model_name+'.log', 'ab+') as f:
 							f.write("[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, acc: %.5f \n" %(e+1, i+1, l, acc))
 						
 					i += 1
