@@ -13,6 +13,9 @@ from variables import *
 
 slim = tf.contrib.slim 
 slim_predict = tf.contrib.slim
+
+np.random.seed(111)
+
 # =========================================================================================
 # Implementation of "Show, Attend and Tell: Neural Caption Generator With Visual Attention".
 # There are some notations.
@@ -24,6 +27,7 @@ slim_predict = tf.contrib.slim
 # M is dimension of word vector which is embedding size (default is 512).
 # H is dimension of hidden state (default is 1024).
 # =========================================================================================
+
 
 class Video_Event_dectection():
 	def __init__(self, dim_ctx=2048, dim_embed=256, dim_hidden=256,\
@@ -91,7 +95,7 @@ class Video_Event_dectection():
 			return c, h
 		
 
-	def _frame_embedding(self, inputs, reuse=False):
+	def _frame_embedding(self, inputs, reuse=None):
 		with tf.variable_scope('frame_embedding', reuse=reuse):
 	
 			w = tf.get_variable('w_f', [self.ctx_shape[1], self.dim_embed], initializer=self.emb_initializer)
@@ -103,7 +107,7 @@ class Video_Event_dectection():
 			return tf.reshape(x, (-1, self.ctx_shape[0], self.dim_embed))
 
 	# dimension!!!!!!! [None, 20,10,self.dim_embed] ????????????
-	def _player_embedding(self, inputs, reuse=False):
+	def _player_embedding(self, inputs, reuse=None):
 		with tf.variable_scope('player_embedding', reuse=reuse):
 			
 			w = tf.get_variable('w_p', [self.player_feature_shape[3], self.dim_embed], initializer=self.emb_initializer)
@@ -115,7 +119,7 @@ class Video_Event_dectection():
 			return tf.reshape(x, (-1, self.ctx_shape[0], 10, self.dim_embed))
 			
 
-	def _attention_layer(self, features, reuse=False):
+	def _attention_layer(self, features, reuse=None):
 		with tf.variable_scope('attention_layer', reuse=reuse):
 			# Remember to change the dimension
 			# N is the number of players (10)
@@ -132,11 +136,11 @@ class Video_Event_dectection():
 			
 			return tf.nn.softmax(em_features)
 
-	def _prediction_layer(self, features, reuse=False):
+	def _prediction_layer(self, features, reuse=None):
 		with tf.variable_scope('prediction_layer', reuse=reuse):
 			# We have 11 classes of events.
-			w = tf.get_variable('w_p', [self.dim_hidden, 11], initializer=self.weight_initializer)
-			return tf.matmul(features, w)
+			self.w_p = tf.get_variable('w_p', [self.dim_hidden, 11], initializer=self.weight_initializer)
+			return tf.nn.relu(tf.matmul(features, self.w_p))
 
 	def build_model(self):
 		#batch_size = tf.shape(features)[0]
@@ -162,10 +166,9 @@ class Video_Event_dectection():
 		lstm2_cell = tf.nn.rnn_cell.BasicLSTMCell(num_units=self.dim_hidden, state_is_tuple=True) # Event Lstm
 		self.loss = 0.0
 		
-		from util.spec_math_ops import *
-
 		for inx in range(self.n_lstm_steps):
 			reuse = (inx!=0)
+			
 			with tf.variable_scope('blstm', reuse): ## reuse means?
 				with tf.variable_scope('FW') as scope:
 					if reuse: scope.reuse_variables()
@@ -187,37 +190,50 @@ class Video_Event_dectection():
 			with tf.variable_scope('event_lstm') as scope:
 				if reuse: scope.reuse_variables()
 				_, (self.c3, self.h3) = lstm2_cell(expected_features, state = (self.c3, self.h3))
-			self.prediction_value = self._prediction_layer(self.h3, reuse)
+			# self.prediction_value = self._prediction_layer(self.h3, reuse)
 
 			#self.error_mat = tf.sub(tf.ones([self.prediction_value[0].get_shape().as_list()[0], 11]), self.labels)
 			
-			self.error_mat = 1 - self.labels
-			self.loss += tf.square(tf.nn.relu(1 - tf.mul(self.error_mat, self.prediction_value)))
-
-		self.loss *= 0.5
-		self.loss = tf.reduce_mean(tf.reduce_sum(self.loss,1))
-
-		return self.loss
+			# self.error_mat = 1 - self.labels
+			# self.loss += tf.square(tf.nn.relu(1 - tf.mul(self.error_mat, self.prediction_value)))
+		
+		self.prediction_value = self._prediction_layer(self.h3)
+		with tf.name_scope('cross_entropy'):
+			self.loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(self.prediction_value, self.labels))
+		
+		with tf.name_scope('accuracy'):
+			with tf.name_scope('correct_prediction'):
+				correct_prediction = tf.equal(tf.argmax(self.prediction_value, 1), tf.argmax(self.labels, 1))
+			with tf.name_scope('accuracy'):
+				self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+				
+		#self.loss *= 0.5
+		#self.loss = tf.reduce_mean(tf.reduce_sum(self.loss,1))
 		
 	def run_model(self, **kwargs):
 
 		# pop out parameters.
 		n_epochs = kwargs.pop('n_epochs', 10)
-		batch_size = kwargs.pop('batch_size', 2)
+		batch_size = kwargs.pop('batch_size', 64)
 		learning_rate = kwargs.pop('learning_rate', 0.01)
-		print_every = kwargs.pop('print_every', 5)
+		print_every = kwargs.pop('print_every', 1)
 		save_every = kwargs.pop('save_every', 1)
 		log_path = kwargs.pop('log_path', '/ais/gobi4/basketball/RNN_log/')
 		model_path = kwargs.pop('model_path', '/ais/gobi4/basketball/RNN_model/')
 		pretrained_model = kwargs.pop('pretrained_model', None)
+		model_name = kwargs.pop('model_name', 'RNN_model')
 
+		with open('/ais/gobi4/basketball/current_videos_clips.pkl','rb') as f:
+			current_videos_clips = np.array(sorted(cPickle.load(f)))
+		
 		if not os.path.exists(model_path):
 			os.makedirs(model_path)
 		if not os.path.exists(log_path):
 			os.makedirs(log_path)
 
-		# Build graphs for training model and sampling captions
-		loss = self.build_model()
+		# Build graphs for training model and sampling captions 
+		# loss = self.build_model()
+		self.build_model()
 		tf.get_variable_scope().reuse_variables()
 
 		self.optimizer = tf.train.AdamOptimizer
@@ -225,12 +241,12 @@ class Video_Event_dectection():
 		# Train op
 		with tf.name_scope('optimizer'):
 			optimizer = self.optimizer(learning_rate = learning_rate)
-			grads = tf.gradients(loss, tf.trainable_variables())
+			grads = tf.gradients(self.loss, tf.trainable_variables())
 			grads_and_vars = list(zip(grads, tf.trainable_variables())) # ?????
 			train_op = optimizer.apply_gradients(grads_and_vars = grads_and_vars)
 		   
 		# Summary op
-		tf.scalar_summary('batch_loss', loss)
+		tf.scalar_summary('batch_loss', self.loss)
 		
 		for var in tf.trainable_variables():
 			tf.histogram_summary(var.op.name, var)
@@ -238,15 +254,17 @@ class Video_Event_dectection():
 			tf.histogram_summary(var.op.name+'/gradient', grad)
 		
 		summary_op = tf.merge_all_summaries()
-
+ 
 		print "The number of epoch: %d" %n_epochs
  		print "Batch size: %d" %batch_size
 		
-		config = tf.ConfigProto(allow_soft_placement = True)
-		#config.gpu_options.per_process_gpu_memory_fraction=0.9
+		config = tf.ConfigProto()
+		#config.gpu_options.allocator_type = 'BFC'
+		config.gpu_options.per_process_gpu_memory_fraction=0.9
 		config.gpu_options.allow_growth = True
 
 		with tf.Session(config=config) as sess:
+		#with tf.Session() as sess:
 			tf.initialize_all_variables().run()
 			summary_writer = tf.train.SummaryWriter(log_path, graph=tf.get_default_graph())
 			saver = tf.train.Saver(max_to_keep=40)
@@ -255,18 +273,21 @@ class Video_Event_dectection():
 				print "Start training with pretrained Model.."
 				saversaver.restore(sess, pretrained_model)
 
-			prev_loss = -1
-			curr_loss = 0
+			prev_loss = -1.0
+			curr_loss = 0.0
 			start_t = time.time()
 
 			for e in range(n_epochs):
 				print "epoch {}".format(e)
+				indices = np.random.permutation(len(current_videos_clips))
+				current_training_files = current_videos_clips[indices]
 				#next_batch = self.data.next_batch_generator(batch_size)
-				next_batch = ["/ais/gobi4/basketball/olga_ethan_features/IKTBGSIwA_o/clip_1"] * batch_size 
 				i = 0
-				while next_batch:
-					if i == 15: break
-					i += 1
+				next_batch = current_training_files[i*batch_size:min((i+1)*batch_size,len(current_training_files))]
+				if len(next_batch) < batch_size: next_batch = None
+				
+				while not next_batch==None:
+					
 					print i
 					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
 					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.player_feature_shape[3]], dtype='float32')
@@ -278,28 +299,37 @@ class Video_Event_dectection():
 						labels_batch[j, self.labels_dict.index(class_name)] = 1
 						new_frame_features = np.load(os.path.join(clip_dir, 'frame_features.npy'))
 						new_player_features = np.swapaxes(np.load(os.path.join(clip_dir, 'player_features.npy')),0,1)
-						#new_event_label = np.load(os.path.join(clip_dir, 'label.npy'))
-						new_seq_len = new_frame_features.shape[0]
-						frame_features_batch[j,:new_frame_features.shape[0],:] = new_frame_features
+						# new_event_label = np.load(os.path.join(clip_dir, 'label.npy'))
+						# new_seq_len = new_frame_features.shape[0]
+						num_frames = new_frame_features.shape[0]
+						frame_features_batch[j,:min(num_frames,20),:] = new_frame_features[:min(num_frames,20),:]
 						num_player = new_player_features.shape[1]
-						player_features_batch[j,:20,:10,:] = new_player_features[:,:10,:]
+						player_features_batch[j,:min(num_frames,20),:min(num_player,10),:] = new_player_features[:min(num_frames,20),:min(num_player,10),:]
 						#labels_batch[i,:] = new_event_label
-						seq_len_batch[j] = new_seq_len
-					print labels_batch
-					# How to use feed_dict !!!!!!!!!
+						seq_len_batch[j] = 20
+						
 					feed_dict = {self.features: frame_features_batch,\
 					 self.player_features: player_features_batch, \
 					 self.labels: labels_batch, self.sequence_lengths: seq_len_batch}
 					
-					_, l = sess.run([train_op, loss], feed_dict)
+					_, l, acc = sess.run([train_op, self.loss, self.accuracy], feed_dict)
+
+					print curr_loss
 					curr_loss += l
 
-					#if i % 10 == 0:
-					#	summary = sess.run(summary_op, feed_dict)
-					#	summary_writer.add_summary(summary, e*n_iters_per_epoch + i)
+					if i % 10 == 0:
+						summary = sess.run(summary_op, feed_dict)
+						summary_writer.add_summary(summary, e*n_iters_per_epoch + i)
 
 					if (i+1) % print_every == 0:
-						print "\nTrain loss at epoch %d & iteration %d (mini-batch): %.5f" %(e+1, i+1, l)
+						print "[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, acc: %.5f" %(e+1, i+1, l, acc)
+						with open(log_path+model_name+'.log', 'ab') as f:
+							f.write("[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, acc: %.5f \n" %(e+1, i+1, l, acc))
+						
+					i += 1
+					next_batch = current_training_files[i*batch_size:min((i+1)*batch_size,len(current_training_files))]
+					if len(next_batch) < batch_size: next_batch=None
+				
 
 
 				print "Previous epoch loss: ", prev_loss
@@ -311,11 +341,10 @@ class Video_Event_dectection():
 					print "model-%s saved." %(e+1)
 			
 				prev_loss = curr_loss
-				curr_loss = 0
+				curr_loss = 0.0
 
 # Debug
 if __name__ == '__main__':
 	cell = Video_Event_dectection()
-	#cell.build_model()
 	cell.run_model()
 
