@@ -213,13 +213,13 @@ class Video_Event_dectection():
 	def run_model(self, **kwargs):
 
 		# pop out parameters.
-		n_epochs = kwargs.pop('n_epochs', 10)
+		n_epochs = kwargs.pop('n_epochs', 15)
 		batch_size = kwargs.pop('batch_size', 64)
 		learning_rate = kwargs.pop('learning_rate', 0.01)
 		print_every = kwargs.pop('print_every', 1)
-		save_every = kwargs.pop('save_every', 1)
-		log_path = kwargs.pop('log_path', '/ais/gobi4/basketball/RNN_log/')
-		model_path = kwargs.pop('model_path', '/ais/gobi4/basketball/RNN_model/')
+		save_every = kwargs.pop('save_every', 10)
+		log_path = kwargs.pop('log_path', '/ais/gobi4/basketball/test_code/RNN_log/')
+		model_path = kwargs.pop('model_path', '/ais/gobi4/basketball/test_code/RNN_model/')
 		pretrained_model = kwargs.pop('pretrained_model', None)
 		model_name = kwargs.pop('model_name', 'RNN_model')
 
@@ -260,7 +260,7 @@ class Video_Event_dectection():
  		print "Batch size: %d" %batch_size
 		
 		config = tf.ConfigProto()
-		#config.gpu_options.allocator_type = 'BFC'
+		config.gpu_options.allocator_type = 'BFC'
 		config.gpu_options.per_process_gpu_memory_fraction=0.9
 		config.gpu_options.allow_growth = True
 
@@ -272,7 +272,7 @@ class Video_Event_dectection():
 
 			if pretrained_model is not None:
 				print "Start training with pretrained Model.."
-				saversaver.restore(sess, pretrained_model)
+				saver.restore(sess, pretrained_model)
 
 			prev_loss = -1.0
 			curr_loss = 0.0
@@ -290,10 +290,14 @@ class Video_Event_dectection():
 				while not next_batch==None:
 					
 					print i
+					minibatch_start_time = time.time()
 					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
 					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.player_feature_shape[3]], dtype='float32')
 					labels_batch = np.zeros([batch_size, 11], dtype='float32')
 					seq_len_batch = 20*np.ones([batch_size])
+
+					loop_start_time = time.time()
+
 					for j, clip_dir in enumerate(next_batch):
 						video_name, clip_id = clip_dir.split('/')[-2], clip_dir.split('/')[-1]
 						class_name = self.global_labels[video_name][clip_id]
@@ -308,7 +312,9 @@ class Video_Event_dectection():
 						player_features_batch[j,:min(num_frames,20),:min(num_player,10),:] = new_player_features[:min(num_frames,20),:min(num_player,10),:]
 						#labels_batch[i,:] = new_event_label
 						seq_len_batch[j] = 20
-						
+
+					print 'the loop took {} seconds to run'.format(time.time()-loop_start_time)	
+					
 					feed_dict = {self.features: frame_features_batch,\
 					 self.player_features: player_features_batch, \
 					 self.labels: labels_batch, self.sequence_lengths: seq_len_batch}
@@ -326,11 +332,12 @@ class Video_Event_dectection():
 					if (i+1) % print_every == 0:
 						print "[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, acc: %.5f" %(e+1, i+1, l, acc)
 						with open(log_path+model_name+'.log', 'ab+') as f:
-							f.write("[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, acc: %.5f \n" %(e+1, i+1, l, acc))
+							f.write("[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, curr_loss: %.5f, acc: %.5f \n" %(e+1, i+1, l, curr_loss, acc))
 						
 					i += 1
 					next_batch = current_training_files[i*batch_size:min((i+1)*batch_size,len(current_training_files))]
 					if len(next_batch) < batch_size: next_batch=None
+					print 'This mini-batch takes {} to run'.format(time.time()-minibatch_start_time)
 				
 
 
@@ -348,5 +355,5 @@ class Video_Event_dectection():
 # Debug
 if __name__ == '__main__':
 	cell = Video_Event_dectection()
+	#cell.run_model(log_path='/ais/gobi4/basketball/RNN_log2/', pretrained_model='/ais/gobi4/basketball/RNN_model/model-10')
 	cell.run_model()
-
