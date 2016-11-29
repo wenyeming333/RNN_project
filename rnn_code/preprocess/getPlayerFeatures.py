@@ -1,4 +1,5 @@
 from keras.applications.inception_v3 import InceptionV3
+from keras.applications.vgg16 import VGG16
 from keras.preprocessing import image
 from keras.models import Model
 from keras.layers import Dense, GlobalAveragePooling2D
@@ -6,8 +7,11 @@ from keras import backend as K
 from keras.preprocessing.image import load_img, img_to_array, list_pictures
 import numpy as np
 # create the base pre-trained model
-def load_model(include_top=False):
+def load_model(include_top=True):
 	return InceptionV3(weights='imagenet', include_top=include_top)
+	
+def load_VGG_model(include_top=True):
+	return VGG16(include_top=include_top, weights='imagenet')
 
 #for layer_i in range(len(base_model.layers)):
 #	print layer_i, base_model.layers[layer_i].output_shape

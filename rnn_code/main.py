@@ -44,16 +44,20 @@ def savePlayerFeatures():
 	
 	videos = [f for f in listdir(processed_dir) \
 					if isdir('{}/{}'.format(processed_dir, f))]
+
+	videos.sort()
 					
 	model = load_model()
 					
-	load_features = load_get_output_fn(model, num_layer=216)
+	load_features = load_get_output_fn(model, num_layer=217)
 					
 	for v in videos:
 	
 		print 'Processing video: {} ...'.format(v)
 		clips = [f for f in listdir('{}/{}'.format(processed_dir, v))\
 					if isdir('{}/{}/{}'.format(processed_dir, v, f))]
+
+		clips.sort()
 					
 		video_path = '{}/{}'.format(features_dir, v)
 		for clip in clips:
@@ -61,9 +65,10 @@ def savePlayerFeatures():
 			im_dir.sort()
 			im_shape = images.shape
 			
-			clip_features = {}
+			#clip_features = {}
 			clip_path = '{}/{}'.format(video_path, clip)
-			unique_ids = {}
+			#unique_ids = {}
+			clip_features = []
 			for i in xrange(images.shape[0]):
 				
 				im = images[i,...]
@@ -82,8 +87,8 @@ def savePlayerFeatures():
 				y_upper = y+h
 				y_upper[y_upper>im_shape[-2]] = im_shape[-2]
 				
-				clip_features[i] = {}
-				
+				#clip_features[i] = {}
+				frame_features = np.zeros([0, 2048], np.float32)
 				for r_i in range(len(im_csv)):
 					try:
 						im_crop = np.swapaxes(im[:,y[r_i]:y_upper[r_i],
@@ -92,27 +97,28 @@ def savePlayerFeatures():
 						im_crop = np.swapaxes(resize(im_crop, (299,299)),
 												0,2)[np.newaxis,...]
 							
-						feature = load_features([im_crop, 0])[0]
-						clip_features[i][im_csv.id[r_i]] = feature.flatten()
-						if im_csv.id[r_i] not in unique_ids:
-							feature_shape = feature.size
-							unique_ids[im_csv.id[r_i]] = np.zeros((i, feature_shape))
-						unique_ids[im_csv.id[r_i]] = np.concatenate((unique_ids[im_csv.id[r_i]],
-																	feature.flatten()[np.newaxis,...]))
+						feature = np.reshape(load_features([im_crop, 0])[0], [1, -1])
+						frame_features = np.concatenate((frame_features, feature))
+						#clip_features[i][im_csv.id[r_i]] = feature.flatten()
+						#if im_csv.id[r_i] not in unique_ids:
+						#	feature_shape = feature.size
+						#	unique_ids[im_csv.id[r_i]] = np.zeros((i, feature_shape))
+						#unique_ids[im_csv.id[r_i]] = np.concatenate((unique_ids[im_csv.id[r_i]],
+						#											feature.flatten()[np.newaxis,...]))
 					except Exception as e:
 						print e
 						
-																
-			n_ids = len(unique_ids)
+				clip_features.append(frame_features)												
+			#n_ids = len(unique_ids)
 			
-			player_features = np.zeros((n_ids, images.shape[0], feature_shape))
+			#player_features = np.zeros((n_ids, images.shape[0], feature_shape))
 			
-			for i, (p_id, features) in enumerate(unique_ids.iteritems()):
-				player_features[i,:features.shape[0],:] = features 				
+			#for i, (p_id, features) in enumerate(unique_ids.iteritems()):
+			#	player_features[i,:features.shape[0],:] = features 
 				
 			
 			Pickle.dump(clip_features, open('{}/player_features.pkl'.format(clip_path), 'w'))
-			np.save('{}/player_features.npy'.format(clip_path),player_features)
+			#np.save('{}/player_features.npy'.format(clip_path),player_features)
 			print ('\tFinish clip: {}'.format(clip))
 	
 def main():
