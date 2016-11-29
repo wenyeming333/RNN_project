@@ -48,9 +48,8 @@ class Video_Event_dectection():
 		"""
 
 		self.ctx_shape = [20, 2048]
-		self.N = 10
 		self.dim_embed = dim_embed
-		self.player_feature_shape = [None, 20, 10, 131072]
+		self.player_feature_shape = [None, 20, 10, 2048]
 		self.dim_ctx = dim_ctx
 		self.dim_hidden = dim_hidden
 		self.n_lstm_steps = n_lstm_steps
@@ -64,7 +63,9 @@ class Video_Event_dectection():
 			self.labels_dict = cPickle.load(f)
 		with open('/ais/gobi4/basketball/olga_ethan_features/event_labels.pkl') as f:
 			self.global_labels = cPickle.load(f)
-		
+
+		# self.batch_size = batch_size
+
 	def set_data(self):
 		from util.setData import RNNData
 		self.data = RNNData(data_dir, action_path, features_dir)
@@ -146,11 +147,20 @@ class Video_Event_dectection():
 		#batch_size = tf.shape(features)[0]
 		self.features = tf.placeholder(tf.float32, [None, self.ctx_shape[0], self.ctx_shape[1]])
 		self.player_features = tf.placeholder(tf.float32, self.player_feature_shape)
+
+		# self.player_features = []
+		# for i in range(self.player_feature_shape[1]):
+		# 	# Need to change dimensions later.
+		# 	eval('self.player_features_{} = tf.placeholder(tf.float32, [self.batch_size, None, 2048])'.format(i))
+		# 	self.player_features.append(eval('self.player_features_{}'.format(i)))
+
 		self.labels = tf.placeholder(tf.float32, [None, 11])
 		# mask = tf.placeholder("float32", [self.batch_size, self.n_lstm_steps])
 
 		self.em_frame = self._frame_embedding(self.features)
 		self.em_player = self._player_embedding(self.player_features)
+		# self.em_player = self.player_features
+
 		#reversed_features = tf.nn.rnn._reverse_seq(features, self.ctx_shape[0], 1, batch_dim=0)
 		self.sequence_lengths = tf.placeholder(tf.int64, [None])
 		
@@ -179,9 +189,11 @@ class Video_Event_dectection():
 					
 			self.frame_features = tf.concat(1, [self.h1, self.h2, self.h3])
 			reshape_frame_features = tf.reshape(self.frame_features, (-1, 1, 768))
+			# player_features = self.em_player[inx]
+			# num_players = player_features.get_shape().as_list()[1]
+			# self.att_features = tf.concat(2, [player_features, tf.tile(reshape_frame_features, [1, num_players, 1])])
 			self.att_features = tf.concat(2, [self.em_player[:,inx,:,:], tf.tile(reshape_frame_features, [1, 10, 1])])
 			gamma = self._attention_layer(self.att_features, reuse)
-			#expected_features = tf.einsum('ij,kjl->il', gamma, self.em_player[:,inx,:,:])
 			
 			#expected_features = tf.ones([4,256])
 			new_gamma = tf.expand_dims(gamma, 2)
@@ -283,6 +295,7 @@ class Video_Event_dectection():
 				indices = np.random.permutation(len(current_videos_clips))
 				current_training_files = current_videos_clips[indices]
 				#next_batch = self.data.next_batch_generator(batch_size)
+
 				i = 0
 				next_batch = current_training_files[i*batch_size:min((i+1)*batch_size,len(current_training_files))]
 				if len(next_batch) < batch_size: next_batch = None
@@ -292,7 +305,7 @@ class Video_Event_dectection():
 					print i
 					minibatch_start_time = time.time()
 					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
-					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.N, self.player_feature_shape[3]], dtype='float32')
+					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], 10, self.player_feature_shape[3]], dtype='float32')
 					labels_batch = np.zeros([batch_size, 11], dtype='float32')
 					seq_len_batch = 20*np.ones([batch_size])
 
@@ -303,22 +316,30 @@ class Video_Event_dectection():
 						class_name = self.global_labels[video_name][clip_id]
 						labels_batch[j, self.labels_dict.index(class_name)] = 1
 						new_frame_features = np.load(os.path.join(clip_dir, 'frame_features.npy'))
-						new_player_features = np.swapaxes(np.load(os.path.join(clip_dir, 'player_features.npy')),0,1)
-						# new_event_label = np.load(os.path.join(clip_dir, 'label.npy'))
-						# new_seq_len = new_frame_features.shape[0]
 						num_frames = new_frame_features.shape[0]
 						frame_features_batch[j,:min(num_frames,20),:] = new_frame_features[:min(num_frames,20),:]
-						num_player = new_player_features.shape[1]
-						player_features_batch[j,:min(num_frames,20),:min(num_player,10),:] = new_player_features[:min(num_frames,20),:min(num_player,10),:]
+
+						with open(os.path.join(clip_dir, 'player_features.pkl')) as f:
+							new_player_features = cPickle.load(f)
+						for frame_id in range(len(new_player_features)):
+							temp_num_players = min(10, new_player_features[frame_id].shape[0])
+							player_features_batch[j, frame_id,:temp_num_players] = new_player_features[frame_id][:temp_num_players,:]
+						
+						#num_player = new_player_features.shape[1]
+						#player_features_batch[j,:min(num_frames,20),:min(num_player,10),:] = new_player_features[:min(num_frames,20),:min(num_player,10),:]
 						#labels_batch[i,:] = new_event_label
-						seq_len_batch[j] = 20
+						seq_len_batch[j] = num_frames
 
 					print 'the loop took {} seconds to run'.format(time.time()-loop_start_time)	
 					
+
+
 					feed_dict = {self.features: frame_features_batch,\
 					 self.player_features: player_features_batch, \
 					 self.labels: labels_batch, self.sequence_lengths: seq_len_batch}
 					
+					for i in range(20): feed_dict[eval('self.player_features_{}'.format(i))] = player_features[i]
+
 					_, l, acc = sess.run([train_op, self.loss, self.accuracy], feed_dict)
 
 					print curr_loss
