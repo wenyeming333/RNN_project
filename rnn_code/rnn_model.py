@@ -161,7 +161,6 @@ class Video_Event_dectection():
 		self.em_player = self._player_embedding(self.player_features)
 		# self.em_player = self.player_features
 
-		#reversed_features = tf.nn.rnn._reverse_seq(features, self.ctx_shape[0], 1, batch_dim=0)
 		self.sequence_lengths = tf.placeholder(tf.int64, [None])
 		
 		reversed_features = tf.reverse_sequence(self.em_frame, self.sequence_lengths, 1, batch_dim=0)
@@ -225,17 +224,17 @@ class Video_Event_dectection():
 	def run_model(self, **kwargs):
 
 		# pop out parameters.
-		n_epochs = kwargs.pop('n_epochs', 15)
+		n_epochs = kwargs.pop('n_epochs', 30)
 		batch_size = kwargs.pop('batch_size', 64)
 		learning_rate = kwargs.pop('learning_rate', 0.01)
 		print_every = kwargs.pop('print_every', 1)
 		save_every = kwargs.pop('save_every', 10)
-		log_path = kwargs.pop('log_path', '/ais/gobi4/basketball/test_code/RNN_log/')
-		model_path = kwargs.pop('model_path', '/ais/gobi4/basketball/test_code/RNN_model/')
+		log_path = kwargs.pop('log_path', 'RNN_log/')
+		model_path = kwargs.pop('model_path', 'RNN_model/')
 		pretrained_model = kwargs.pop('pretrained_model', None)
 		model_name = kwargs.pop('model_name', 'RNN_model')
 
-		with open('/ais/gobi4/basketball/current_videos_clips.pkl','rb') as f:
+		with open('current_videos_clips.pkl','rb') as f:
 			current_videos_clips = np.array(sorted(cPickle.load(f)))
 		
 		if not os.path.exists(model_path):
@@ -260,6 +259,7 @@ class Video_Event_dectection():
 		# Summary op
 		tf.scalar_summary('batch_loss', self.loss)
 		tf.scalar_summary('accuracy', self.accuracy)
+		# tf.sclar learning rate
 
 		for var in tf.trainable_variables():
 			tf.histogram_summary(var.op.name, var)
@@ -338,7 +338,7 @@ class Video_Event_dectection():
 					 self.player_features: player_features_batch, \
 					 self.labels: labels_batch, self.sequence_lengths: seq_len_batch}
 					
-					for i in range(20): feed_dict[eval('self.player_features_{}'.format(i))] = player_features[i]
+					# for i in range(20): feed_dict[eval('self.player_features_{}'.format(i))] = player_features[i]
 
 					_, l, acc = sess.run([train_op, self.loss, self.accuracy], feed_dict)
 
@@ -376,5 +376,4 @@ class Video_Event_dectection():
 # Debug
 if __name__ == '__main__':
 	cell = Video_Event_dectection()
-	#cell.run_model(log_path='/ais/gobi4/basketball/RNN_log2/', pretrained_model='/ais/gobi4/basketball/RNN_model/model-10')
 	cell.run_model()
