@@ -117,6 +117,28 @@ class Video_Event_dectection():
 			inputs = tf.reshape(inputs, (-1, self.player_feature_shape[3]))
 			x = tf.nn.relu(tf.matmul(inputs, w)+b, name='player_vector')
 			return tf.reshape(x, (-1, self.ctx_shape[0], 10, self.dim_embed))
+
+	def _player_spatial_embedding(self, inputs, reuse=False):
+		with tf.variable_scope('spatial_embedding', reuse=reuse):
+			input_shape = inputs.get_shape()
+			inputs = tf.reshape(inputs, (-1, input_shape[3], input_shape[4], 1))
+
+			W_1 = tf.truncated_normal([5, 5, 1, 32], stddev=0.1)
+			b_1 = tf.Variable(tf.constant(0.1, shape=[32]))
+			h_conv1 = tf.nn.relu(tf.nn.conv2d(inputs, W_1, stride=[1,1,1,1], padding='SAME')+b_1)
+			h_conv1 = tf.nn.max_pool(h_conv1, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
+
+			W_2 = tf.truncated_normal([5, 5, 32, 64], stddev=0.1)
+			b_2 = tf.Variable(tf.constant(0.1, shape=[64]))
+			h_conv2 = tf.nn.relu(tf.nn.conv2d(h_conv1, W_2, stride=[1,1,1,1], padding='SAME')+b_2)
+			h_conv2 = tf.nn.max_pool(h_conv2, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
+			h_2_shape = h_conv2.get_shape()
+
+			h_conv2_flat = tf.reshape(h_conv2, (-1, h_2_shape[1]*h_2_shape[2]*h_2_shape[3]))
+			W_fc1 = tf.truncated_normal([h_2_shape[1]*h_2_shape[2]*h_2_shape[3], self.dim_embed], stddev=0.1)
+			b_fc1 = tf.Variable(tf.constant(0.1, shape=[self.dim_embed]))
+			h_fc1 = tf.nn.relu(tf.matmul(h_conv2_flat, W_fc1) + b_fc1)
+			return tf.reshape(h_fc1, (-1, input_shape[1], input_shape[2], self.dim_embed))
 			
 
 	def _attention_layer(self, features, reuse=None):
@@ -325,11 +347,10 @@ class Video_Event_dectection():
 				if len(next_batch) < batch_size: next_batch = None
 				
 				while not next_batch==None:
-					
-					#print i
 					minibatch_start_time = time.time()
 					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
 					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], 10, self.player_feature_shape[3]], dtype='float32')
+					spatial_features_batch = np.zeros([batch_size, self.ctx_shape[0], 10, 200, 100])
 					labels_batch = np.zeros([batch_size, 11], dtype='float32')
 					seq_len_batch = 20*np.ones([batch_size])
 
@@ -338,12 +359,19 @@ class Video_Event_dectection():
 						class_name = self.global_labels[video_name][clip_id]
 						labels_batch[j, self.labels_dict.index(class_name)] = 1
 						new_frame_features = np.load(os.path.join(clip_dir, 'frame_features.npy'))
-						num_frames = new_frame_features.shape[0]
-						frame_features_batch[j,:min(num_frames,20),:] = new_frame_features[:min(num_frames,20),:]
+						num_frames = min(20, new_frame_features.shape[0])
+						frame_features_batch[j,:num_frames,:] = new_frame_features[:num_frames,:]
 
 						with open(os.path.join(clip_dir, 'player_features.pkl')) as f:
 							new_player_features = cPickle.load(f)
-						for frame_id in range(len(new_player_features)):
+
+						#with open(os.path.join(clip_dir, 'spatial_features.pkl')) as f:
+						#	new_spatial_features = cPickle.load(f)
+
+						#assert (len(new_player_features) == len(new_spatial_features),
+						#		'Number of frames in {} for spatial and appearance features do not match.'.format(clip_dir))
+
+						for frame_id in range(num_frames):
 							temp_num_players = min(10, new_player_features[frame_id].shape[0])
 							player_features_batch[j, frame_id,:temp_num_players] = new_player_features[frame_id][:temp_num_players,:]
 						
@@ -383,26 +411,26 @@ class Video_Event_dectection():
 						val_start = time.time()
 						val_l, val_acc = 0.0, 0.0
 
-						# val_files = np.random.permutation(len(val_files))
+						val_files = val_files[np.random.permutation(len(val_files))]
 						next_batch_val = val_files[:min(batch_size,len(val_files))]
 						if len(next_batch_val) < batch_size: next_batch_val = None
 
 						while not next_batch_val==None:
+							frame_features_jj = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
+							player_features_jj = np.zeros([batch_size, self.ctx_shape[0], 10, self.player_feature_shape[3]], dtype='float32')
+							labels_jj = np.zeros([batch_size, 11], dtype='float32')
+							seq_len_jj = 20*np.ones([batch_size])
 							for jj, val_dir in enumerate(next_batch_val):
-								frame_features_jj = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
-								player_features_jj = np.zeros([batch_size, self.ctx_shape[0], 10, self.player_feature_shape[3]], dtype='float32')
-								labels_jj = np.zeros([batch_size, 11], dtype='float32')
-								seq_len_jj = 20*np.ones([batch_size])
 								video_name, clip_id = val_dir.split('/')[-2], val_dir.split('/')[-1]
 								class_name = self.global_labels[video_name][clip_id]
 								labels_jj[jj, self.labels_dict.index(class_name)] = 1						
 								new_frame_features = np.load(os.path.join(val_dir, 'frame_features.npy'))
-								num_frames = new_frame_features.shape[0]
-								frame_features_jj[jj,:min(num_frames,20),:] = new_frame_features[:min(num_frames,20),:]
+								num_frames = min(20, new_frame_features.shape[0])
+								frame_features_jj[jj,:num_frames,:] = new_frame_features[:num_frames,:]
 
 								with open(os.path.join(val_dir, 'player_features.pkl')) as f:
 									new_player_features = cPickle.load(f)
-								for frame_id in range(len(new_player_features)):
+								for frame_id in range(num_frames):
 									temp_num_players = min(10, new_player_features[frame_id].shape[0])
 									player_features_jj[jj, frame_id,:temp_num_players] = new_player_features[frame_id][:temp_num_players,:]
 								seq_len_jj[jj] = num_frames
@@ -435,7 +463,7 @@ class Video_Event_dectection():
 
 							with open(log_path+model_name+'.log', 'ab+') as f:
 								f.write("[VAL] epoch: %d, iteration: %d, validation_batch: %d, val_loss: %.5f, val_acc: %.5f \n" \
-									%(e+1, i+1, ii, temp_l, temp_l))
+									%(e+1, i+1, ii, temp_l, temp_acc))
 
 					############## Validation
 
