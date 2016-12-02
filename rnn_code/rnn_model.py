@@ -185,18 +185,6 @@ class Video_Event_dectection():
 					if reuse: scope.reuse_variables()
 					_, (self.c2, self.h2) = blstm_bw_cell(reversed_features[:,inx,:], state=(self.c2, self.h2))
 					
-
-			####### Debug #######
-
-
-			# frame_features = tf.concat(1, [self.h1, self.h2])
-			# with tf.variable_scope('event_lstm') as scope:
-			# 	if reuse: scope.reuse_variables()
-			# 	_, (self.c3, self.h3) = lstm2_cell(frame_features, state = (self.c3, self.h3))
-
-
-			#######  end  #######
-
 			self.frame_features = tf.concat(1, [self.h1, self.h2, self.h3]) # It actually event and frame features together.
 
 			reshape_frame_features = tf.reshape(self.frame_features, (-1, 1, 768))
@@ -236,7 +224,8 @@ class Video_Event_dectection():
 		batch_size = kwargs.pop('batch_size', 64)
 		learning_rate = kwargs.pop('learning_rate', 0.01)
 		print_every = kwargs.pop('print_every', 1)
-		save_every = kwargs.pop('save_every', 15)
+		save_every = kwargs.pop('save_every', 100000)
+		val_every = kwargs.pop('val_every', 3)
 		log_path = kwargs.pop('log_path', 'RNN_log/')
 		model_path = kwargs.pop('model_path', 'RNN_model/')
 		pretrained_model = kwargs.pop('pretrained_model', None)
@@ -257,18 +246,13 @@ class Video_Event_dectection():
 		print 'number of videos for training: ', len(train_files)
 		print 'number of videos for validation: ', len(val_files)
 
-		train, val = train_test_split(current_videos_clips, test_fraction=0.2, random_state=111)
-		
 		if not os.path.exists(model_path):
 			os.makedirs(model_path)
 		if not os.path.exists(log_path):
 			os.makedirs(log_path)
 
-		# Build graphs for training model and sampling captions 
-		# loss = self.build_model()
+		# Build graphs for training model.
 		self.build_model()
-		# self.decay_buff = tf.placeholder(tf.int32)
-		# self.learning_rate = learning_rate * 0.97 ** (tf.cast(self.decay_buff, tf.float32)//15)
 
 		global_step = tf.Variable(0, name='global_step', trainable=False)
 		self.learning_rate = tf.train.exponential_decay(learning_rate, global_step, \
@@ -299,7 +283,7 @@ class Video_Event_dectection():
 		#	tf.histogram_summary(var.op.name+'/gradient', grad)
 		
 		summary_op = tf.merge_all_summaries()
- 
+
 		print "The number of epoch: %d" %n_epochs
  		print "Batch size: %d" %batch_size
 		
@@ -310,7 +294,9 @@ class Video_Event_dectection():
 
 		with tf.Session(config=config) as sess:
 			tf.initialize_all_variables().run()
-			summary_writer = tf.train.SummaryWriter(log_path, graph=tf.get_default_graph())
+			# summary_writer means train_writer here.
+			summary_writer = tf.train.SummaryWriter(log_path+'train/', graph=tf.get_default_graph())
+			val_writer = tf.train.SummaryWriter(log_path+'val/', graph=tf.get_default_graph())
 			saver = tf.train.Saver(max_to_keep=40)
 
 			if pretrained_model is not None:
@@ -321,14 +307,17 @@ class Video_Event_dectection():
 			curr_loss = 0.0
 			start_t = time.time()
 
-			n_iters_per_epoch = len(current_videos_clips) // batch_size
+			n_iters_per_epoch = len(train_files) // batch_size
 
 			for e in range(n_epochs):
+
+				val_count = 0
+
 				print "epoch {}".format(e)
 
-				epoch_acc = 0
-				indices = np.random.permutation(len(current_videos_clips))
-				current_training_files = current_videos_clips[indices]
+				epoch_acc = 0.0
+				indices = np.random.permutation(len(train_files))
+				current_training_files = train_files[indices]
 				#next_batch = self.data.next_batch_generator(batch_size)
 
 				i = 0
@@ -370,7 +359,6 @@ class Video_Event_dectection():
 					 self.labels: labels_batch, self.sequence_lengths: seq_len_batch}
 					
 					# for i in range(20): feed_dict[eval('self.player_features_{}'.format(i))] = player_features[i]
-
 					# _, l, acc, lr = sess.run([train_op, self.loss, self.accuracy, self.learning_rate], feed_dict)
 					_, l, acc = sess.run([train_op, self.loss, self.accuracy], feed_dict)
 
@@ -383,15 +371,78 @@ class Video_Event_dectection():
 
 					if (i+1) % print_every == 0:
 						#print "[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, acc: %.5f, lr: %.5f" %(e+1, i+1, l, acc, self.learning_rate)
-						print "[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, acc: %.5f" %(e+1, i+1, l, acc)
+						print "[TRAIN] epoch: %d, iteration: %d, (mini-batch) loss: %.5f, acc: %.5f" %(e+1, i+1, l, acc)
 						with open(log_path+model_name+'.log', 'ab+') as f:
 							f.write("[TRAIN] epoch: %d, iteration: %d (mini-batch) loss: %.5f, curr_loss: %.5f, acc: %.5f \n" %(e+1, i+1, l, curr_loss, acc))
+					
+
+					############## Validation
+
+					if (i+1) % val_every == 0:
+						ii = 0
+						val_start = time.time()
+						val_l, val_acc = 0.0, 0.0
+
+						# val_files = np.random.permutation(len(val_files))
+						next_batch_val = val_files[:min(batch_size,len(val_files))]
+						if len(next_batch_val) < batch_size: next_batch_val = None
+
+						while not next_batch_val==None:
+							for jj, val_dir in enumerate(next_batch_val):
+								frame_features_jj = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
+								player_features_jj = np.zeros([batch_size, self.ctx_shape[0], 10, self.player_feature_shape[3]], dtype='float32')
+								labels_jj = np.zeros([batch_size, 11], dtype='float32')
+								seq_len_jj = 20*np.ones([batch_size])
+								video_name, clip_id = val_dir.split('/')[-2], val_dir.split('/')[-1]
+								class_name = self.global_labels[video_name][clip_id]
+								labels_jj[jj, self.labels_dict.index(class_name)] = 1						
+								new_frame_features = np.load(os.path.join(val_dir, 'frame_features.npy'))
+								num_frames = new_frame_features.shape[0]
+								frame_features_jj[jj,:min(num_frames,20),:] = new_frame_features[:min(num_frames,20),:]
+
+								with open(os.path.join(val_dir, 'player_features.pkl')) as f:
+									new_player_features = cPickle.load(f)
+								for frame_id in range(len(new_player_features)):
+									temp_num_players = min(10, new_player_features[frame_id].shape[0])
+									player_features_jj[jj, frame_id,:temp_num_players] = new_player_features[frame_id][:temp_num_players,:]
+								seq_len_jj[jj] = num_frames
+
+							feed_dict = {self.features: frame_features_jj,\
+						 	 self.player_features: player_features_jj, \
+						 	 self.labels: labels_jj, self.sequence_lengths: seq_len_jj}
+
+						 	temp_l, temp_acc = sess.run([self.loss, self.accuracy], feed_dict)
+
+						 	summary = sess.run(summary_op, feed_dict)
+						 	val_writer.add_summary(summary, val_count)
+
+						 	#val_l += temp_l
+						 	#val_acc += temp_acc
+						 	val_count += 1
+
+							ii += 1
+							next_batch_val = val_files[ii*batch_size:min((ii+1)*batch_size,len(val_files))]
+							if len(next_batch_val) < batch_size: next_batch_val = None
+							if ii == 4: next_batch_val = None
 						
+						# num_val_files = (len(val_files) // batch_size) * batch_size
+						# val_l, val_acc = val_l / ii, val_acc / ii
+
+							print 'validation takes {} seconds'.format(time.time()-val_start)
+
+							print "[VAL] epoch: %d, iteration: %d, validation_batch: %d, val_loss: %.5f, val_acc: %.5f"\
+						 	 %(e+1, i+1, ii, temp_l, temp_acc)
+
+							with open(log_path+model_name+'.log', 'ab+') as f:
+								f.write("[VAL] epoch: %d, iteration: %d, validation_batch: %d, val_loss: %.5f, val_acc: %.5f \n" \
+									%(e+1, i+1, ii, temp_l, temp_l))
+
+					############## Validation
+
 					i += 1
 					next_batch = current_training_files[i*batch_size:min((i+1)*batch_size,len(current_training_files))]
 					if len(next_batch) < batch_size: next_batch=None
 				
-
 				print "Previous epoch loss: ", prev_loss
 				print "Current epoch loss: ", curr_loss
 				print "Elapsed time: ", time.time() - start_t
@@ -400,7 +451,7 @@ class Video_Event_dectection():
 					f.write("[TRAIN] epoch: %d, epoch_loss: %.5f, epoch_acc: %.5f \n" %(e+1, curr_loss, epoch_acc / n_iters_per_epoch))
 
 				if (e+1) % save_every == 0:
-					saver.save(sess, os.path.join(model_path, 'model'), global_step=e+1)
+					saver.save(sess, os.path.join(model_path, 'model{}'.format(e+1)))
 					print "model-%s saved." %(e+1)
 			
 				prev_loss = curr_loss
