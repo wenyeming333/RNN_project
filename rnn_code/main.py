@@ -140,7 +140,7 @@ def savePlayerSpatialFeatures():
 					
 	load_features = load_get_output_fn(model, num_layer=217)
 					
-	for v in videos:
+	for v in videos[143:]:
 	
 		print 'Processing video: {} ...'.format(v)
 		clips = [f for f in listdir('{}/{}'.format(processed_dir, v))\
@@ -150,7 +150,15 @@ def savePlayerSpatialFeatures():
 					
 		video_path = '{}/{}'.format(features_dir, v)
 		for clip in clips:
-			im_dir, images = load_image_from_dir('{}/{}/{}'.format(processed_dir, v, clip))
+			
+			try:
+				im_dir, images = load_image_from_dir('{}/{}/{}'.format(processed_dir, v, clip))
+			except Exception:
+				with open('no_frame_videos.txt', 'ab') as f:
+					f.write('{}/{}\n'.format(v, clip))
+
+				Pickle.dump([], open('{}/spatial_features.pkl'.format(clip_path), 'w'))
+				continue
 			im_dir.sort()
 			im_shape = images.shape
 			
@@ -177,12 +185,12 @@ def savePlayerSpatialFeatures():
 				y_upper[y_upper>im_shape[-2]] = im_shape[-2]
 				
 				#clip_features[i] = {}
-				frame_features = np.zeros([0, 200, 100], np.float32)
+				frame_features = np.zeros([0, 20, 40], np.bool_)
 				for r_i in range(len(im_csv)):
 					try:
 						mask = np.zeros([im.shape[1], im.shape[2]])
 						mask[y[r_i]:y_upper[r_i], x[r_i]:x_upper[r_i]] = 1
-						mask = resize(mask, (200, 100))[np.newaxis,...]
+						mask = resize(mask, (20, 40))[np.newaxis,...]
 						frame_features = np.concatenate((frame_features, mask))
 					except Exception as e:
 						print e

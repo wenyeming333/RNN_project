@@ -243,11 +243,11 @@ class Video_Event_dectection():
 
 		# pop out parameters.
 		n_epochs = kwargs.pop('n_epochs', 200)
-		batch_size = kwargs.pop('batch_size', 64)
+		batch_size = kwargs.pop('batch_size', 256)
 		learning_rate = kwargs.pop('learning_rate', 0.01)
 		print_every = kwargs.pop('print_every', 1)
-		save_every = kwargs.pop('save_every', 50)
-		val_every = kwargs.pop('val_every', 15)
+		save_every = kwargs.pop('save_every', 10)
+		val_every = kwargs.pop('val_every', 30)
 		log_path = kwargs.pop('log_path', 'RNN_log/')
 		model_path = kwargs.pop('model_path', 'RNN_model/')
 		pretrained_model = kwargs.pop('pretrained_model', None)
@@ -264,9 +264,9 @@ class Video_Event_dectection():
 		 train_size = 0.8, random_state=111)
 		train_files = current_videos_clips[train]
 		val_files = current_videos_clips[val]
-		print 'number of videos in total: ', len(current_videos_clips)
-		print 'number of videos for training: ', len(train_files)
-		print 'number of videos for validation: ', len(val_files)
+		print 'number of events in total: ', len(current_videos_clips)
+		print 'number of events for training: ', len(train_files)
+		print 'number of events for validation: ', len(val_files)
 
 		if not os.path.exists(model_path):
 			os.makedirs(model_path)
@@ -278,7 +278,7 @@ class Video_Event_dectection():
 
 		global_step = tf.Variable(0, name='global_step', trainable=False)
 		self.learning_rate = tf.train.exponential_decay(learning_rate, global_step, \
-		 	60, 0.96, staircase=False)
+		 	150, 0.96, staircase=False)
 
 		tf.scalar_summary('global_step', global_step)
 		tf.scalar_summary('learning_rate', self.learning_rate)
@@ -311,7 +311,7 @@ class Video_Event_dectection():
 		
 		config = tf.ConfigProto()
 		config.gpu_options.allocator_type = 'BFC'
-		config.gpu_options.per_process_gpu_memory_fraction=0.9
+		config.gpu_options.per_process_gpu_memory_fraction = 0.9
 		config.gpu_options.allow_growth = True
 
 		with tf.Session(config=config) as sess:
@@ -331,11 +331,13 @@ class Video_Event_dectection():
 
 			n_iters_per_epoch = len(train_files) // batch_size
 
+			val_count = 0
+
 			for e in range(n_epochs):
 
-				val_count = 0
-
 				print "epoch {}".format(e)
+
+				epoch_start_time = time.time()
 
 				epoch_acc = 0.0
 				indices = np.random.permutation(len(train_files))
@@ -484,6 +486,7 @@ class Video_Event_dectection():
 			
 				prev_loss = curr_loss
 				curr_loss = 0.0
+				print 'this epoch took {} seconds to run'.format(time.time()-epoch_start_time)
 
 # Debug
 if __name__ == '__main__':

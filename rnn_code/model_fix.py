@@ -51,6 +51,7 @@ class Video_Event_dectection():
 		self.ctx_shape = [20, 2048]
 		self.dim_embed = dim_embed
 		self.player_feature_shape = [None, 20, 10, 2048]
+		self.spatial_feature_shape = [None, 20, 10, 20, 40]
 		self.dim_ctx = dim_ctx
 		self.dim_hidden = dim_hidden
 		self.n_lstm_steps = n_lstm_steps
@@ -120,19 +121,19 @@ class Video_Event_dectection():
 
 	def _player_spatial_embedding(self, inputs, reuse=False):
 		with tf.variable_scope('spatial_embedding', reuse=reuse):
-			input_shape = inputs.get_shape()
+			input_shape = inputs.get_shape().as_list()
 			inputs = tf.reshape(inputs, (-1, input_shape[3], input_shape[4], 1))
 
-			W_1 = tf.truncated_normal([5, 5, 1, 32], stddev=0.1)
-			b_1 = tf.Variable(tf.constant(0.1, shape=[32]))
-			h_conv1 = tf.nn.relu(tf.nn.conv2d(inputs, W_1, stride=[1,1,1,1], padding='SAME')+b_1)
+			W_1 = tf.truncated_normal([3, 3, 1, 8], stddev=0.1)
+			b_1 = tf.Variable(tf.constant(0.1, shape=[8]))
+			h_conv1 = tf.nn.relu(tf.nn.conv2d(inputs, W_1, strides=[1,1,1,1], padding='SAME')+b_1)
 			h_conv1 = tf.nn.max_pool(h_conv1, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
 
-			W_2 = tf.truncated_normal([5, 5, 32, 64], stddev=0.1)
-			b_2 = tf.Variable(tf.constant(0.1, shape=[64]))
-			h_conv2 = tf.nn.relu(tf.nn.conv2d(h_conv1, W_2, stride=[1,1,1,1], padding='SAME')+b_2)
+			W_2 = tf.truncated_normal([3, 3, 8, 16], stddev=0.1)
+			b_2 = tf.Variable(tf.constant(0.1, shape=[16]))
+			h_conv2 = tf.nn.relu(tf.nn.conv2d(h_conv1, W_2, strides=[1,1,1,1], padding='SAME')+b_2)
 			h_conv2 = tf.nn.max_pool(h_conv2, ksize=[1,2,2,1], strides=[1,2,2,1], padding='SAME')
-			h_2_shape = h_conv2.get_shape()
+			h_2_shape = h_conv2.get_shape().as_list()
 
 			h_conv2_flat = tf.reshape(h_conv2, (-1, h_2_shape[1]*h_2_shape[2]*h_2_shape[3]))
 			W_fc1 = tf.truncated_normal([h_2_shape[1]*h_2_shape[2]*h_2_shape[3], self.dim_embed], stddev=0.1)
@@ -170,6 +171,7 @@ class Video_Event_dectection():
 	def build_model(self):
 		self.features = tf.placeholder(tf.float32, [None, self.ctx_shape[0], self.ctx_shape[1]])
 		self.player_features = tf.placeholder(tf.float32, self.player_feature_shape)
+		self.spatial_features = tf.placeholder(tf.float32, self.spatial_feature_shape)
 
 		# self.player_features = []
 		# for i in range(self.player_feature_shape[1]):
@@ -181,6 +183,8 @@ class Video_Event_dectection():
 
 		self.em_frame = self._frame_embedding(self.features)
 		self.em_player = self._player_embedding(self.player_features)
+		self.em_spatial = self._player_spatial_embedding(self.spatial_features)
+		self.em_player = tf.concat(3, [self.em_player, self.em_spatial])
 
 		self.sequence_lengths = tf.placeholder(tf.int64, [None])
 		
@@ -243,13 +247,13 @@ class Video_Event_dectection():
 
 		# pop out parameters.
 		n_epochs = kwargs.pop('n_epochs', 200)
-		batch_size = kwargs.pop('batch_size', 64)
+		batch_size = kwargs.pop('batch_size', 256)
 		learning_rate = kwargs.pop('learning_rate', 0.01)
 		print_every = kwargs.pop('print_every', 1)
-		save_every = kwargs.pop('save_every', 50)
-		val_every = kwargs.pop('val_every', 15)
-		log_path = kwargs.pop('log_path', 'RNN_log/')
-		model_path = kwargs.pop('model_path', 'RNN_model/')
+		save_every = kwargs.pop('save_every', 10)
+		val_every = kwargs.pop('val_every', 30)
+		log_path = kwargs.pop('log_path', 'RNN_logff/')
+		model_path = kwargs.pop('model_path', 'RNN_modelff/')
 		pretrained_model = kwargs.pop('pretrained_model', None)
 		model_name = kwargs.pop('model_name', 'RNN_model')
 
@@ -278,7 +282,7 @@ class Video_Event_dectection():
 
 		global_step = tf.Variable(0, name='global_step', trainable=False)
 		self.learning_rate = tf.train.exponential_decay(learning_rate, global_step, \
-		 	60, 0.96, staircase=False)
+		 	150, 0.96, staircase=False)
 
 		tf.scalar_summary('global_step', global_step)
 		tf.scalar_summary('learning_rate', self.learning_rate)
@@ -311,7 +315,7 @@ class Video_Event_dectection():
 		
 		config = tf.ConfigProto()
 		config.gpu_options.allocator_type = 'BFC'
-		config.gpu_options.per_process_gpu_memory_fraction=0.9
+		config.gpu_options.per_process_gpu_memory_fraction = 0.9
 		config.gpu_options.allow_growth = True
 
 		with tf.Session(config=config) as sess:
@@ -331,11 +335,14 @@ class Video_Event_dectection():
 
 			n_iters_per_epoch = len(train_files) // batch_size
 
+			val_count = 0
+
 			for e in range(n_epochs):
 
-				val_count = 0
 
 				print "epoch {}".format(e)
+
+				epoch_start_time = time.time()
 
 				epoch_acc = 0.0
 				indices = np.random.permutation(len(train_files))
@@ -350,7 +357,7 @@ class Video_Event_dectection():
 					minibatch_start_time = time.time()
 					frame_features_batch = np.zeros([batch_size, self.ctx_shape[0], self.ctx_shape[1]], dtype='float32')
 					player_features_batch = np.zeros([batch_size, self.ctx_shape[0], 10, self.player_feature_shape[3]], dtype='float32')
-					spatial_features_batch = np.zeros([batch_size, self.ctx_shape[0], 10, 200, 100])
+					spatial_features_batch = np.zeros([batch_size, self.ctx_shape[0], 10, 20, 40])
 					labels_batch = np.zeros([batch_size, 11], dtype='float32')
 					seq_len_batch = 20*np.ones([batch_size])
 
@@ -365,15 +372,15 @@ class Video_Event_dectection():
 						with open(os.path.join(clip_dir, 'player_features.pkl')) as f:
 							new_player_features = cPickle.load(f)
 
-						#with open(os.path.join(clip_dir, 'spatial_features.pkl')) as f:
-						#	new_spatial_features = cPickle.load(f)
+						with open(os.path.join(clip_dir, 'spatial_features.pkl')) as f:
+							new_spatial_features = cPickle.load(f)
 
-						#assert (len(new_player_features) == len(new_spatial_features),
-						#		'Number of frames in {} for spatial and appearance features do not match.'.format(clip_dir))
+						assert len(new_player_features) == len(new_spatial_features)
 
 						for frame_id in range(num_frames):
 							temp_num_players = min(10, new_player_features[frame_id].shape[0])
 							player_features_batch[j, frame_id,:temp_num_players] = new_player_features[frame_id][:temp_num_players,:]
+							spatial_features_batch[j, frame_id,:temp_num_players] = new_spatial_features[frame_id][:temp_num_players,:]
 						
 						#num_player = new_player_features.shape[1]
 						#player_features_batch[j,:min(num_frames,20),:min(num_player,10),:] = new_player_features[:min(num_frames,20),:min(num_player,10),:]
@@ -384,7 +391,8 @@ class Video_Event_dectection():
 
 					feed_dict = {self.features: frame_features_batch,\
 					 self.player_features: player_features_batch, \
-					 self.labels: labels_batch, self.sequence_lengths: seq_len_batch}
+					 self.labels: labels_batch, self.sequence_lengths: seq_len_batch,
+					 self.spatial_features: spatial_features_batch}
 					
 					# for i in range(20): feed_dict[eval('self.player_features_{}'.format(i))] = player_features[i]
 					# _, l, acc, lr = sess.run([train_op, self.loss, self.accuracy, self.learning_rate], feed_dict)
@@ -484,6 +492,7 @@ class Video_Event_dectection():
 			
 				prev_loss = curr_loss
 				curr_loss = 0.0
+				print 'this epoch took {} seconds to run'.format(time.time()-epoch_start_time)
 
 # Debug
 if __name__ == '__main__':
