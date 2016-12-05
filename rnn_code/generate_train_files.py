@@ -4,7 +4,7 @@ import os
 
 
 current_video = 'hahahaha'
-current_num_videos = 75
+current_num_videos = 125
 features_dir = '/ais/gobi4/basketball/olga_ethan_features/'
 videos = sorted(os.listdir(features_dir))
 

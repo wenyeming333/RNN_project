@@ -51,7 +51,7 @@ def savePlayerFeatures():
 					
 	load_features = load_get_output_fn(model, num_layer=217)
 					
-	for v in videos:
+	for v in videos[125:]:
 	
 		print 'Processing video: {} ...'.format(v)
 		clips = [f for f in listdir('{}/{}'.format(processed_dir, v))\
@@ -89,6 +89,8 @@ def savePlayerFeatures():
 				
 				#clip_features[i] = {}
 				frame_features = np.zeros([0, 2048], np.float32)
+				images_array = np.zeros([0, 3, 299, 299], np.float32)
+				
 				for r_i in range(len(im_csv)):
 					try:
 						im_crop = np.swapaxes(im[:,y[r_i]:y_upper[r_i],
@@ -96,9 +98,9 @@ def savePlayerFeatures():
 						
 						im_crop = np.swapaxes(resize(im_crop, (299,299)),
 												0,2)[np.newaxis,...]
-							
-						feature = np.reshape(load_features([im_crop, 0])[0], [1, -1])
-						frame_features = np.concatenate((frame_features, feature))
+
+						images_array = np.concatenate((images_array, im_crop))
+					
 						#clip_features[i][im_csv.id[r_i]] = feature.flatten()
 						#if im_csv.id[r_i] not in unique_ids:
 						#	feature_shape = feature.size
@@ -108,6 +110,7 @@ def savePlayerFeatures():
 					except Exception as e:
 						print e
 						
+				frame_features = np.reshape(load_features([images_array, 0])[0], [-1, 2048])
 				clip_features.append(frame_features)												
 			#n_ids = len(unique_ids)
 			
@@ -210,8 +213,8 @@ def savePlayerSpatialFeatures():
 	
 def main():
 	#saveProcessAllData()
-	#savePlayerFeatures()
-	savePlayerSpatialFeatures()
+	savePlayerFeatures()
+	#savePlayerSpatialFeatures()
 	
 if __name__ == '__main__':
 	main()
